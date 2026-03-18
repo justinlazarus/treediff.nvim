@@ -1,59 +1,69 @@
 local M = {}
+local ffi = require("ffi")
 
---- Load the native Rust module.
---- Returns nil if not compiled yet.
-local function load_native()
-  -- Add the plugin's lua/ dir to cpath so require finds the .so
-  local plugin_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h")
-  local so_path = plugin_dir .. "/treediff_native.so"
-  if not package.cpath:find(plugin_dir, 1, true) then
-    package.cpath = plugin_dir .. "/?.so;" .. package.cpath
+pcall(ffi.cdef, [[
+  int treediff_diff_files(const char *old_path, const char *new_path, const char *out_path);
+  char *treediff_diff_tokens(const char *old_src, const char *new_src, const char *lang_name);
+  void treediff_free(char *ptr);
+]])
+
+--- Load the native library.
+local lib
+local function load_lib()
+  if lib then return lib end
+
+  -- Find the native lib by searching runtimepath
+  local candidates = {}
+  for _, rtp in ipairs(vim.api.nvim_list_runtime_paths()) do
+    table.insert(candidates, rtp .. "/lib/treediff_native.so")
+    table.insert(candidates, rtp .. "/lib/treediff_native.dylib")
+    table.insert(candidates, rtp .. "/target/release/libtreediff.dylib")
   end
-  local ok, native = pcall(require, "treediff_native")
-  if ok then return native end
+  for _, candidate in ipairs(candidates) do
+    if vim.fn.filereadable(candidate) == 1 then
+      local ok, l = pcall(ffi.load, candidate)
+      if ok then
+        lib = l
+        return lib
+      end
+    end
+  end
   return nil
 end
 
 --- Set up treediff as the diffexpr.
 function M.setup()
-  local native = load_native()
-  if not native then
-    vim.notify("treediff: native module not found — run `cargo build --release`", vim.log.levels.WARN)
-    return
-  end
+  local native = load_lib()
+  if not native then return end
 
   M._native = native
-
-  -- Register as Neovim's diff engine
   vim.o.diffexpr = "v:lua.TreeDiffExpr()"
 
-  -- Global function called by diffexpr
   _G.TreeDiffExpr = function()
     local old_file = vim.v.fname_in
     local new_file = vim.v.fname_new
     local out_file = vim.v.fname_out
-    local ok, err = pcall(M._native.diff_files, old_file, new_file, out_file)
-    if not ok then
-      -- Fallback: system diff
-      vim.fn.system("diff " .. vim.fn.shellescape(old_file) .. " " .. vim.fn.shellescape(new_file) .. " > " .. vim.fn.shellescape(out_file))
-    end
+    native.treediff_diff_files(old_file, new_file, out_file)
   end
 end
 
 --- Diff two strings and return token-level change data.
---- Returns only novel (changed) tokens — unchanged tokens are omitted.
 --- @param old_content string
 --- @param new_content string
---- @param lang string  Tree-sitter language name (e.g. "lua", "c_sharp", "rust")
---- @return table|nil  { lhs_tokens = {{line, start_col, end_col}, ...}, rhs_tokens = {...} }
+--- @param lang string  Tree-sitter language name (e.g. "lua", "c_sharp")
+--- @return table|nil  { lhs_tokens = {...}, rhs_tokens = {...} }
 function M.diff(old_content, new_content, lang)
-  if not M._native then
-    local native = load_native()
-    if not native then return nil end
-    M._native = native
-  end
-  local ok, result = pcall(M._native.diff_tokens, old_content, new_content, lang)
-  if not ok or result == nil then return nil end
+  local native = load_lib()
+  if not native then return nil end
+
+  local ptr = native.treediff_diff_tokens(old_content, new_content, lang)
+  if ptr == nil then return nil end
+
+  local json_str = ffi.string(ptr)
+  native.treediff_free(ptr)
+
+  local ok, result = pcall(vim.json.decode, json_str)
+  if not ok then return nil end
   return result
 end
 

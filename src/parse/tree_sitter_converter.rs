@@ -99,7 +99,7 @@ fn build_list_parts<'a>(
 
     // Check if first and last children are matching delimiters
     let first_child = node.child(0);
-    let last_child = node.child(child_count as u32 - 1);
+    let last_child = node.child(child_count - 1);
 
     let mut open_content = String::new();
     let mut open_position = vec![];

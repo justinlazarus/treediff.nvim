@@ -11,17 +11,18 @@ use crate::parse::syntax::{init_all_info, Syntax};
 use crate::parse::tree_sitter_converter;
 
 /// Load a tree-sitter language grammar from a .so file.
-pub fn load_language(parser_path: &Path) -> Option<tree_sitter::Language> {
+/// `lang_name` is used to construct the symbol name (e.g., "lua" → "tree_sitter_lua").
+pub fn load_language(parser_path: &Path, lang_name: &str) -> Option<tree_sitter::Language> {
     let lib = unsafe { libloading::Library::new(parser_path).ok()? };
-    // SAFETY: The parser .so exports a valid tree_sitter_language function.
-    let lang_fn = unsafe {
-        let func: libloading::Symbol<unsafe extern "C" fn() -> tree_sitter_language::LanguageFn> =
-            lib.get(b"tree_sitter_language").ok()?;
+    // Neovim parsers export tree_sitter_<lang>, e.g. tree_sitter_lua
+    let symbol_name = format!("tree_sitter_{}", lang_name);
+    let lang = unsafe {
+        let func: libloading::Symbol<unsafe extern "C" fn() -> tree_sitter::Language> =
+            lib.get(symbol_name.as_bytes()).ok()?;
         func()
     };
     // Keep the library alive (parsers are loaded once and persist)
     std::mem::forget(lib);
-    let lang = tree_sitter::Language::new(lang_fn);
     Some(lang)
 }
 
