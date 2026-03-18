@@ -95,18 +95,201 @@ pub fn structural_diff(
     line_diff_ed_style(old_src, new_src)
 }
 
-/// Convert a ChangeMap into ed-style diff output by walking the syntax trees
-/// and mapping novel nodes to line changes.
+/// Collect all line numbers that contain novel (changed) syntax nodes.
+fn collect_novel_lines<'a>(
+    nodes: &[&'a Syntax<'a>],
+    change_map: &ChangeMap<'a>,
+    novel_lines: &mut std::collections::BTreeSet<usize>,
+) {
+    use crate::diff::changes::ChangeKind;
+
+    for node in nodes {
+        let change = change_map.get(node);
+        match change {
+            Some(ChangeKind::Novel)
+            | Some(ChangeKind::ReplacedComment(_, _))
+            | Some(ChangeKind::ReplacedString(_, _)) => {
+                // This node is changed — mark all its lines
+                match node {
+                    Syntax::Atom { position, .. } => {
+                        for span in position {
+                            novel_lines.insert(span.line.0 as usize);
+                        }
+                    }
+                    Syntax::List {
+                        open_position,
+                        close_position,
+                        children,
+                        ..
+                    } => {
+                        for span in open_position {
+                            novel_lines.insert(span.line.0 as usize);
+                        }
+                        for span in close_position {
+                            novel_lines.insert(span.line.0 as usize);
+                        }
+                        // Mark all children's lines too
+                        for child in children {
+                            mark_all_lines(child, novel_lines);
+                        }
+                    }
+                }
+            }
+            Some(ChangeKind::Unchanged(_)) => {
+                // For List nodes, children might still differ
+                if let Syntax::List { children, .. } = node {
+                    collect_novel_lines(children, change_map, novel_lines);
+                }
+            }
+            None => {
+                // No change info — recurse into children
+                if let Syntax::List { children, .. } = node {
+                    collect_novel_lines(children, change_map, novel_lines);
+                }
+            }
+        }
+    }
+}
+
+/// Mark ALL lines covered by a syntax node and its descendants.
+fn mark_all_lines(node: &Syntax, lines: &mut std::collections::BTreeSet<usize>) {
+    match node {
+        Syntax::Atom { position, .. } => {
+            for span in position {
+                lines.insert(span.line.0 as usize);
+            }
+        }
+        Syntax::List {
+            open_position,
+            close_position,
+            children,
+            ..
+        } => {
+            for span in open_position {
+                lines.insert(span.line.0 as usize);
+            }
+            for span in close_position {
+                lines.insert(span.line.0 as usize);
+            }
+            for child in children {
+                mark_all_lines(child, lines);
+            }
+        }
+    }
+}
+
+/// Convert a ChangeMap into ed-style diff output by walking the syntax trees,
+/// finding which lines have novel content, and producing diff commands.
 fn change_map_to_ed_diff<'a>(
     old_src: &str,
     new_src: &str,
-    _lhs_nodes: &[&'a Syntax<'a>],
-    _rhs_nodes: &[&'a Syntax<'a>],
-    _change_map: &ChangeMap<'a>,
+    lhs_nodes: &[&'a Syntax<'a>],
+    rhs_nodes: &[&'a Syntax<'a>],
+    change_map: &ChangeMap<'a>,
 ) -> String {
-    // TODO: Walk the syntax trees, collect novel/unchanged line pairings,
-    // and produce ed-style output. For now, fall back to line diff.
-    line_diff_ed_style(old_src, new_src)
+    let mut lhs_novel = std::collections::BTreeSet::new();
+    let mut rhs_novel = std::collections::BTreeSet::new();
+
+    collect_novel_lines(lhs_nodes, change_map, &mut lhs_novel);
+    collect_novel_lines(rhs_nodes, change_map, &mut rhs_novel);
+
+    // If no changes detected, return empty
+    if lhs_novel.is_empty() && rhs_novel.is_empty() {
+        return String::new();
+    }
+
+    let old_lines: Vec<&str> = old_src.lines().collect();
+    let new_lines: Vec<&str> = new_src.lines().collect();
+
+    // Build ed-style diff from the novel line sets.
+    // Walk both files in parallel, matching unchanged lines and
+    // grouping novel lines into add/delete/change commands.
+    let mut result = String::new();
+    let mut oi = 0usize; // position in old
+    let mut ni = 0usize; // position in new
+
+    while oi < old_lines.len() || ni < new_lines.len() {
+        if oi < old_lines.len() && ni < new_lines.len()
+            && !lhs_novel.contains(&oi) && !rhs_novel.contains(&ni)
+        {
+            // Both lines unchanged — advance
+            oi += 1;
+            ni += 1;
+            continue;
+        }
+
+        // Collect consecutive novel lines on each side
+        let old_start = oi;
+        let new_start = ni;
+        while oi < old_lines.len() && lhs_novel.contains(&oi) {
+            oi += 1;
+        }
+        while ni < new_lines.len() && rhs_novel.contains(&ni) {
+            ni += 1;
+        }
+
+        let del_count = oi - old_start;
+        let add_count = ni - new_start;
+
+        if del_count == 0 && add_count == 0 {
+            // Neither side has novel lines but they didn't match above.
+            // This can happen when lines are unchanged per tree diff
+            // but shifted. Just advance both.
+            oi += 1;
+            ni += 1;
+            continue;
+        }
+
+        if del_count > 0 && add_count > 0 {
+            // Change
+            let os = old_start + 1;
+            let oe = oi;
+            let ns = new_start + 1;
+            let ne = ni;
+            if os == oe && ns == ne {
+                result.push_str(&format!("{}c{}\n", os, ns));
+            } else if os == oe {
+                result.push_str(&format!("{}c{},{}\n", os, ns, ne));
+            } else if ns == ne {
+                result.push_str(&format!("{},{}c{}\n", os, oe, ns));
+            } else {
+                result.push_str(&format!("{},{}c{},{}\n", os, oe, ns, ne));
+            }
+            for k in old_start..oi {
+                result.push_str(&format!("< {}\n", old_lines[k]));
+            }
+            result.push_str("---\n");
+            for k in new_start..ni {
+                result.push_str(&format!("> {}\n", new_lines[k]));
+            }
+        } else if del_count > 0 {
+            // Delete
+            let os = old_start + 1;
+            let oe = oi;
+            if os == oe {
+                result.push_str(&format!("{}d{}\n", os, new_start));
+            } else {
+                result.push_str(&format!("{},{}d{}\n", os, oe, new_start));
+            }
+            for k in old_start..oi {
+                result.push_str(&format!("< {}\n", old_lines[k]));
+            }
+        } else {
+            // Add
+            let ns = new_start + 1;
+            let ne = ni;
+            if ns == ne {
+                result.push_str(&format!("{}a{}\n", old_start, ns));
+            } else {
+                result.push_str(&format!("{}a{},{}\n", old_start, ns, ne));
+            }
+            for k in new_start..ni {
+                result.push_str(&format!("> {}\n", new_lines[k]));
+            }
+        }
+    }
+
+    result
 }
 
 /// Line-level diff using the `similar` crate, producing ed-style output.
