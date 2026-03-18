@@ -6,111 +6,96 @@ mod diff;
 mod hash;
 mod lines;
 mod parse;
+mod treediff;
 mod words;
 
 use nvim_oxi as oxi;
 use nvim_oxi::{Dictionary, Function, Object};
-use similar::DiffOp;
 use std::fs;
+use std::path::PathBuf;
 
-/// Compute a line-level diff between two files and write ed-style output.
-/// This will be replaced with tree-sitter-aware diffing.
+/// Detect language from file extension and find the parser .so
+fn detect_language(file_path: &str) -> Option<(String, PathBuf)> {
+    let ext = std::path::Path::new(file_path)
+        .extension()?
+        .to_str()?;
+
+    let lang_name = match ext {
+        "rs" => "rust",
+        "lua" => "lua",
+        "py" => "python",
+        "js" => "javascript",
+        "jsx" => "javascript",
+        "ts" => "typescript",
+        "tsx" => "tsx",
+        "c" => "c",
+        "h" => "c",
+        "cpp" | "cc" | "cxx" => "cpp",
+        "hpp" | "hh" => "cpp",
+        "cs" => "c_sharp",
+        "go" => "go",
+        "java" => "java",
+        "rb" => "ruby",
+        "sh" | "bash" => "bash",
+        "json" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "scss" => "scss",
+        "md" => "markdown",
+        "sql" => "sql",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "dart" => "dart",
+        "zig" => "zig",
+        "ex" | "exs" => "elixir",
+        _ => return None,
+    };
+
+    // Search common Neovim parser locations
+    let search_paths = vec![
+        dirs_parser_path("site/pack/core/opt/nvim-treesitter/parser"),
+        dirs_parser_path("site/pack/packer/start/nvim-treesitter/parser"),
+        dirs_parser_path("lazy/nvim-treesitter/parser"),
+    ];
+
+    for base in search_paths.into_iter().flatten() {
+        let parser_path = base.join(format!("{}.so", lang_name));
+        if parser_path.exists() {
+            return Some((lang_name.to_string(), parser_path));
+        }
+    }
+
+    None
+}
+
+/// Get a parser directory path under Neovim's data dir.
+fn dirs_parser_path(subpath: &str) -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let path = PathBuf::from(home)
+        .join(".local/share/nvim")
+        .join(subpath);
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Compute a diff between two files and write ed-style output.
 fn diff_files(old_path: String, new_path: String, out_path: String) -> oxi::Result<()> {
     let old_content = fs::read_to_string(&old_path).unwrap_or_default();
     let new_content = fs::read_to_string(&new_path).unwrap_or_default();
 
-    let diff = similar::TextDiff::from_lines(&old_content, &new_content);
-    let mut result = String::new();
+    // Try to detect language and load tree-sitter parser
+    let language = detect_language(&old_path)
+        .or_else(|| detect_language(&new_path))
+        .and_then(|(_, parser_path)| treediff::load_language(&parser_path));
 
-    for group in diff.grouped_ops(0) {
-        for op in &group {
-            match *op {
-                DiffOp::Equal { .. } => {}
-                DiffOp::Insert {
-                    old_index,
-                    new_index,
-                    new_len,
-                } => {
-                    let after = old_index; // 0-indexed position in old
-                    let new_start = new_index + 1; // 1-indexed
-                    let new_end = new_index + new_len;
-                    if new_start == new_end {
-                        result.push_str(&format!("{}a{}\n", after, new_start));
-                    } else {
-                        result.push_str(&format!("{}a{},{}\n", after, new_start, new_end));
-                    }
-                    for i in new_index..new_index + new_len {
-                        let line = diff.new_slices()[i];
-                        result.push_str(&format!("> {}", line));
-                        if !line.ends_with('\n') {
-                            result.push('\n');
-                        }
-                    }
-                }
-                DiffOp::Delete {
-                    old_index,
-                    old_len,
-                    new_index,
-                } => {
-                    let old_start = old_index + 1; // 1-indexed
-                    let old_end = old_index + old_len;
-                    let after = new_index; // position in new
-                    if old_start == old_end {
-                        result.push_str(&format!("{}d{}\n", old_start, after));
-                    } else {
-                        result.push_str(&format!("{},{}d{}\n", old_start, old_end, after));
-                    }
-                    for i in old_index..old_index + old_len {
-                        let line = diff.old_slices()[i];
-                        result.push_str(&format!("< {}", line));
-                        if !line.ends_with('\n') {
-                            result.push('\n');
-                        }
-                    }
-                }
-                DiffOp::Replace {
-                    old_index,
-                    old_len,
-                    new_index,
-                    new_len,
-                } => {
-                    let old_start = old_index + 1;
-                    let old_end = old_index + old_len;
-                    let new_start = new_index + 1;
-                    let new_end = new_index + new_len;
-                    if old_start == old_end && new_start == new_end {
-                        result.push_str(&format!("{}c{}\n", old_start, new_start));
-                    } else if old_start == old_end {
-                        result.push_str(&format!("{}c{},{}\n", old_start, new_start, new_end));
-                    } else if new_start == new_end {
-                        result.push_str(&format!("{},{}c{}\n", old_start, old_end, new_start));
-                    } else {
-                        result.push_str(&format!(
-                            "{},{}c{},{}\n",
-                            old_start, old_end, new_start, new_end
-                        ));
-                    }
-                    for i in old_index..old_index + old_len {
-                        let line = diff.old_slices()[i];
-                        result.push_str(&format!("< {}", line));
-                        if !line.ends_with('\n') {
-                            result.push('\n');
-                        }
-                    }
-                    result.push_str("---\n");
-                    for i in new_index..new_index + new_len {
-                        let line = diff.new_slices()[i];
-                        result.push_str(&format!("> {}", line));
-                        if !line.ends_with('\n') {
-                            result.push('\n');
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+    let result = treediff::structural_diff(&old_content, &new_content, language);
     fs::write(&out_path, result).unwrap_or_default();
+
     Ok(())
 }
 
