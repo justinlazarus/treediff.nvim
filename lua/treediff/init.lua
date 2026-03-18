@@ -40,16 +40,21 @@ function M.setup()
   end
 end
 
---- Direct API: diff two strings, returns structured result.
---- This is what plz.nvim (or any plugin) would call.
+--- Diff two strings and return token-level change data.
+--- Returns only novel (changed) tokens — unchanged tokens are omitted.
 --- @param old_content string
 --- @param new_content string
---- @param lang string|nil  Tree-sitter language name
---- @return table|nil  { pairings: {}, changes: {} }
+--- @param lang string  Tree-sitter language name (e.g. "lua", "c_sharp", "rust")
+--- @return table|nil  { lhs_tokens = {{line, start_col, end_col}, ...}, rhs_tokens = {...} }
 function M.diff(old_content, new_content, lang)
-  -- TODO: implement structured diff API
-  -- For now, return nil (not implemented)
-  return nil
+  if not M._native then
+    local native = load_native()
+    if not native then return nil end
+    M._native = native
+  end
+  local ok, result = pcall(M._native.diff_tokens, old_content, new_content, lang)
+  if not ok or result == nil then return nil end
+  return result
 end
 
 return M

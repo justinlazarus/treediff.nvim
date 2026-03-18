@@ -99,6 +99,57 @@ fn diff_files(old_path: String, new_path: String, out_path: String) -> oxi::Resu
     Ok(())
 }
 
+/// Convert a TokenInfo vec into a Lua-compatible array of tables.
+fn tokens_to_object(tokens: &[treediff::TokenInfo]) -> Object {
+    let arr: Vec<Object> = tokens
+        .iter()
+        .filter(|t| t.kind == treediff::TokenChange::Novel)
+        .map(|t| {
+            let dict = Dictionary::from_iter([
+                ("line", Object::from(t.line as i64)),
+                ("start_col", Object::from(t.start_col as i64)),
+                ("end_col", Object::from(t.end_col as i64)),
+            ]);
+            Object::from(dict)
+        })
+        .collect();
+    Object::from(nvim_oxi::Array::from_iter(arr))
+}
+
+/// Compute a structural diff and return token-level change data to Lua.
+fn diff_tokens_lua(
+    old_content: String,
+    new_content: String,
+    lang_name: String,
+) -> oxi::Result<Object> {
+    // Find the parser .so for this language
+    let search_paths = vec![
+        dirs_parser_path("site/pack/core/opt/nvim-treesitter/parser"),
+        dirs_parser_path("site/pack/packer/start/nvim-treesitter/parser"),
+        dirs_parser_path("lazy/nvim-treesitter/parser"),
+    ];
+
+    let mut language = None;
+    for base in search_paths.into_iter().flatten() {
+        let parser_path = base.join(format!("{}.so", lang_name));
+        if parser_path.exists() {
+            language = treediff::load_language(&parser_path);
+            break;
+        }
+    }
+
+    match treediff::diff_tokens(&old_content, &new_content, language) {
+        Some(result) => {
+            let dict = Dictionary::from_iter([
+                ("lhs_tokens", tokens_to_object(&result.lhs_tokens)),
+                ("rhs_tokens", tokens_to_object(&result.rhs_tokens)),
+            ]);
+            Ok(Object::from(dict))
+        }
+        None => Ok(Object::nil()),
+    }
+}
+
 /// Plugin entry point. Exposes functions to Lua.
 #[oxi::plugin]
 fn treediff_native() -> Dictionary {
@@ -109,5 +160,14 @@ fn treediff_native() -> Dictionary {
         },
     );
 
-    Dictionary::from_iter([("diff_files", Object::from(diff_fn))])
+    let diff_tokens_fn: Function<(String, String, String), Object> = Function::from_fn(
+        |(old_content, new_content, lang_name): (String, String, String)| {
+            diff_tokens_lua(old_content, new_content, lang_name)
+        },
+    );
+
+    Dictionary::from_iter([
+        ("diff_files", Object::from(diff_fn)),
+        ("diff_tokens", Object::from(diff_tokens_fn)),
+    ])
 }

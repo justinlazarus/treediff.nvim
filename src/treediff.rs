@@ -292,6 +292,148 @@ fn change_map_to_ed_diff<'a>(
     result
 }
 
+/// A token with its position and change kind, for Lua consumption.
+#[derive(Debug, Clone)]
+pub struct TokenInfo {
+    pub line: usize,       // 0-indexed line number
+    pub start_col: usize,  // 0-indexed byte offset within line
+    pub end_col: usize,    // 0-indexed byte offset end
+    pub kind: TokenChange, // novel, unchanged, etc.
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenChange {
+    Novel,
+    Unchanged,
+}
+
+/// Full structured diff result for Lua consumption.
+#[derive(Debug)]
+pub struct DiffResult {
+    pub lhs_tokens: Vec<TokenInfo>,
+    pub rhs_tokens: Vec<TokenInfo>,
+}
+
+/// Collect token-level change info from syntax nodes.
+fn collect_tokens<'a>(
+    nodes: &[&'a Syntax<'a>],
+    change_map: &ChangeMap<'a>,
+    tokens: &mut Vec<TokenInfo>,
+) {
+    use crate::diff::changes::ChangeKind;
+
+    for node in nodes {
+        let change = change_map.get(node);
+        match change {
+            Some(ChangeKind::Novel) => {
+                add_node_tokens(node, TokenChange::Novel, tokens);
+            }
+            Some(ChangeKind::ReplacedComment(_, _))
+            | Some(ChangeKind::ReplacedString(_, _)) => {
+                add_node_tokens(node, TokenChange::Novel, tokens);
+            }
+            Some(ChangeKind::Unchanged(_)) => {
+                match node {
+                    Syntax::Atom { position, .. } => {
+                        for span in position {
+                            tokens.push(TokenInfo {
+                                line: span.line.0 as usize,
+                                start_col: span.start_col as usize,
+                                end_col: span.end_col as usize,
+                                kind: TokenChange::Unchanged,
+                            });
+                        }
+                    }
+                    Syntax::List { children, .. } => {
+                        // Delimiters unchanged, but children may differ
+                        collect_tokens(children, change_map, tokens);
+                    }
+                }
+            }
+            None => {
+                if let Syntax::List { children, .. } = node {
+                    collect_tokens(children, change_map, tokens);
+                }
+            }
+        }
+    }
+}
+
+/// Add all spans of a syntax node (and its descendants) as tokens.
+fn add_node_tokens(node: &Syntax, kind: TokenChange, tokens: &mut Vec<TokenInfo>) {
+    match node {
+        Syntax::Atom { position, .. } => {
+            for span in position {
+                tokens.push(TokenInfo {
+                    line: span.line.0 as usize,
+                    start_col: span.start_col as usize,
+                    end_col: span.end_col as usize,
+                    kind: kind.clone(),
+                });
+            }
+        }
+        Syntax::List {
+            open_position,
+            close_position,
+            children,
+            ..
+        } => {
+            for span in open_position {
+                tokens.push(TokenInfo {
+                    line: span.line.0 as usize,
+                    start_col: span.start_col as usize,
+                    end_col: span.end_col as usize,
+                    kind: kind.clone(),
+                });
+            }
+            for child in children {
+                add_node_tokens(child, kind.clone(), tokens);
+            }
+            for span in close_position {
+                tokens.push(TokenInfo {
+                    line: span.line.0 as usize,
+                    start_col: span.start_col as usize,
+                    end_col: span.end_col as usize,
+                    kind: kind.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// Compute a structural diff returning token-level change data.
+/// This is the API that plz.nvim (or any plugin) calls.
+pub fn diff_tokens(
+    old_src: &str,
+    new_src: &str,
+    language: Option<tree_sitter::Language>,
+) -> Option<DiffResult> {
+    let lang = language?;
+    let lhs_arena = Arena::new();
+    let rhs_arena = Arena::new();
+
+    let lhs_nodes = parse_to_syntax(old_src, lang.clone(), &lhs_arena);
+    let rhs_nodes = parse_to_syntax(new_src, lang, &rhs_arena);
+
+    if lhs_nodes.is_empty() && rhs_nodes.is_empty() {
+        return None;
+    }
+
+    init_all_info(&lhs_nodes, &rhs_nodes);
+    let change_map = diff_syntaxes(&lhs_nodes, &rhs_nodes);
+
+    let mut lhs_tokens = Vec::new();
+    let mut rhs_tokens = Vec::new();
+
+    collect_tokens(&lhs_nodes, &change_map, &mut lhs_tokens);
+    collect_tokens(&rhs_nodes, &change_map, &mut rhs_tokens);
+
+    Some(DiffResult {
+        lhs_tokens,
+        rhs_tokens,
+    })
+}
+
 /// Line-level diff using the `similar` crate, producing ed-style output.
 pub fn line_diff_ed_style(old_src: &str, new_src: &str) -> String {
     use similar::DiffOp;
