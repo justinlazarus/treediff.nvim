@@ -32,9 +32,11 @@ function M.setup()
     local old_file = vim.v.fname_in
     local new_file = vim.v.fname_new
     local out_file = vim.v.fname_out
-    -- For now, use system diff to prove the pipeline works.
-    -- TODO: replace with native Rust tree diff
-    vim.fn.system("diff " .. vim.fn.shellescape(old_file) .. " " .. vim.fn.shellescape(new_file) .. " > " .. vim.fn.shellescape(out_file))
+    local ok, err = pcall(M._native.diff_files, old_file, new_file, out_file)
+    if not ok then
+      -- Fallback: system diff
+      vim.fn.system("diff " .. vim.fn.shellescape(old_file) .. " " .. vim.fn.shellescape(new_file) .. " > " .. vim.fn.shellescape(out_file))
+    end
   end
 end
 
