@@ -120,26 +120,22 @@ fn fix_all_nested_sliders<'a>(
 /// example.
 fn fix_nested_slider_prefer_outer<'a>(node: &'a Syntax<'a>, change_map: &mut ChangeMap<'a>) {
     if let List { children, .. } = node {
-        match change_map
-            .get(node)
-            .expect("Changes should be set before slider correction")
-        {
-            Unchanged(_) => {
-                let mut candidates = vec![];
-                unchanged_descendants_for_outer_slider(children, &mut candidates, change_map);
+        if let Some(change) = change_map.get(node) {
+            match change {
+                Unchanged(_) => {
+                    let mut candidates = vec![];
+                    unchanged_descendants_for_outer_slider(children, &mut candidates, change_map);
 
-                // We can slide if there is a single unchanged
-                // descendant, that descendant is a list, and that
-                // list has novel delimiters.
-                if let [candidate] = candidates[..] {
-                    if matches!(candidate, List { .. })
-                        && matches!(change_map.get(candidate), Some(Novel))
-                    {
-                        push_unchanged_to_descendant(node, candidate, change_map);
+                    if let [candidate] = candidates[..] {
+                        if matches!(candidate, List { .. })
+                            && matches!(change_map.get(candidate), Some(Novel))
+                        {
+                            push_unchanged_to_descendant(node, candidate, change_map);
+                        }
                     }
                 }
+                ReplacedComment(_, _) | ReplacedString(_, _) | Novel => {}
             }
-            ReplacedComment(_, _) | ReplacedString(_, _) | Novel => {}
         }
 
         for child in children {
@@ -153,18 +149,17 @@ fn fix_nested_slider_prefer_outer<'a>(node: &'a Syntax<'a>, change_map: &mut Cha
 /// example.
 fn fix_nested_slider_prefer_inner<'a>(node: &'a Syntax<'a>, change_map: &mut ChangeMap<'a>) {
     if let List { children, .. } = node {
-        match change_map
-            .get(node)
-            .expect("Changes should be set before slider correction")
-        {
-            Unchanged(_) => {}
-            ReplacedComment(_, _) | ReplacedString(_, _) => {}
-            Novel => {
-                let mut found_unchanged = vec![];
-                unchanged_descendants(children, &mut found_unchanged, change_map);
+        if let Some(change) = change_map.get(node) {
+            match change {
+                Unchanged(_) => {}
+                ReplacedComment(_, _) | ReplacedString(_, _) => {}
+                Novel => {
+                    let mut found_unchanged = vec![];
+                    unchanged_descendants(children, &mut found_unchanged, change_map);
 
-                if let [List { .. }] = found_unchanged[..] {
-                    push_unchanged_to_ancestor(node, found_unchanged[0], change_map);
+                    if let [List { .. }] = found_unchanged[..] {
+                        push_unchanged_to_ancestor(node, found_unchanged[0], change_map);
+                    }
                 }
             }
         }
@@ -188,15 +183,16 @@ fn unchanged_descendants<'a>(
     }
 
     for node in nodes {
-        match change_map.get(node).unwrap() {
-            Unchanged(_) => {
+        match change_map.get(node) {
+            Some(Unchanged(_)) => {
                 found.push(node);
             }
-            Novel | ReplacedComment(_, _) | ReplacedString(_, _) => {
+            Some(Novel) | Some(ReplacedComment(_, _)) | Some(ReplacedString(_, _)) => {
                 if let List { children, .. } = node {
                     unchanged_descendants(children, found, change_map);
                 }
             }
+            None => {}
         }
     }
 }
@@ -285,9 +281,10 @@ fn push_unchanged_to_descendant<'a>(
     inner: &'a Syntax<'a>,
     change_map: &mut ChangeMap<'a>,
 ) {
-    let root_change = change_map
-        .get(root)
-        .expect("Changes should be set before slider correction");
+    let root_change = match change_map.get(root) {
+        Some(c) => c,
+        None => return,
+    };
 
     let delimiters_match = match (root, inner) {
         (
@@ -319,7 +316,10 @@ fn push_unchanged_to_ancestor<'a>(
     inner: &'a Syntax<'a>,
     change_map: &mut ChangeMap<'a>,
 ) {
-    let inner_change = change_map.get(inner).expect("Node changes should be set");
+    let inner_change = match change_map.get(inner) {
+        Some(c) => c,
+        None => return,
+    };
 
     let delimiters_match = match (root, inner) {
         (
@@ -365,7 +365,16 @@ fn novel_regions_after_unchanged<'a>(
     let mut region: Option<Vec<usize>> = None;
 
     for (i, node) in nodes.iter().enumerate() {
-        let change = change_map.get(node).expect("Node changes should be set");
+        let change = match change_map.get(node) {
+            Some(c) => c,
+            None => {
+                if let Some(region) = region {
+                    regions.push(region);
+                }
+                region = None;
+                continue;
+            }
+        };
 
         match change {
             Unchanged(_) => {
@@ -415,7 +424,13 @@ fn novel_regions_before_unchanged<'a>(
     let mut region: Option<Vec<usize>> = None;
 
     for (i, node) in nodes.iter().enumerate() {
-        let change = change_map.get(node).expect("Node changes should be set");
+        let change = match change_map.get(node) {
+            Some(c) => c,
+            None => {
+                region = None;
+                continue;
+            }
+        };
 
         match change {
             Unchanged(_) => {
@@ -510,11 +525,8 @@ fn slide_to_prev_node<'a>(
     let distance_to_last = distance_between(before_last_node, last_node);
 
     if distance_to_before_start <= distance_to_last {
-        let opposite = match change_map
-            .get(before_start_node)
-            .expect("Node changes should be set")
-        {
-            Unchanged(n) => {
+        let opposite = match change_map.get(before_start_node) {
+            Some(Unchanged(n)) => {
                 if before_start_node.content_id() != n.content_id() {
                     return;
                 }
@@ -581,11 +593,8 @@ fn slide_to_next_node<'a>(
     let distance_to_after_last = distance_between(last_node, after_last_node);
 
     if distance_to_after_last < distance_to_start {
-        let opposite = match change_map
-            .get(after_last_node)
-            .expect("Node changes should be set")
-        {
-            Unchanged(n) => {
+        let opposite = match change_map.get(after_last_node) {
+            Some(Unchanged(n)) => {
                 if after_last_node.content_id() != n.content_id() {
                     return;
                 }

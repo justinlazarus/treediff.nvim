@@ -179,61 +179,66 @@ pub extern "C" fn treediff_diff_tokens(
 
 /// Diff two pre-built syntax trees (JSON from Lua's tree_walker.lua).
 /// Returns JSON with token-level changes. Caller must free with treediff_free.
+/// Returns null on error (including panics) — never crashes the host process.
 #[no_mangle]
 pub extern "C" fn treediff_diff_nodes(
     lhs_json: *const c_char,
     rhs_json: *const c_char,
     lang_name: *const c_char,
 ) -> *mut c_char {
-    let lhs_json = unsafe { CStr::from_ptr(lhs_json) }.to_str().unwrap_or("[]");
-    let rhs_json = unsafe { CStr::from_ptr(rhs_json) }.to_str().unwrap_or("[]");
-    let lang_name = unsafe { CStr::from_ptr(lang_name) }.to_str().unwrap_or("");
+    // Catch any panic so we never crash Neovim
+    let result = std::panic::catch_unwind(|| {
+        let lhs_json = unsafe { CStr::from_ptr(lhs_json) }.to_str().unwrap_or("[]");
+        let rhs_json = unsafe { CStr::from_ptr(rhs_json) }.to_str().unwrap_or("[]");
+        let lang_name = unsafe { CStr::from_ptr(lang_name) }.to_str().unwrap_or("");
 
-    let result = match treediff::diff_tokens_from_json(lhs_json, rhs_json, lang_name) {
-        Some(r) => r,
-        None => return std::ptr::null_mut(),
-    };
+        let result = match treediff::diff_tokens_from_json(lhs_json, rhs_json, lang_name) {
+            Some(r) => r,
+            None => return std::ptr::null_mut(),
+        };
 
-    // Serialize to JSON — same format as treediff_diff_tokens
-    #[derive(serde::Serialize)]
-    struct TokenOut {
-        line: usize,
-        start_col: usize,
-        end_col: usize,
-    }
-    #[derive(serde::Serialize)]
-    struct DiffOut {
-        lhs_tokens: Vec<TokenOut>,
-        rhs_tokens: Vec<TokenOut>,
-    }
+        #[derive(serde::Serialize)]
+        struct TokenOut {
+            line: usize,
+            start_col: usize,
+            end_col: usize,
+        }
+        #[derive(serde::Serialize)]
+        struct DiffOut {
+            lhs_tokens: Vec<TokenOut>,
+            rhs_tokens: Vec<TokenOut>,
+        }
 
-    let out = DiffOut {
-        lhs_tokens: result
-            .lhs_tokens
-            .iter()
-            .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
-            .map(|t| TokenOut {
-                line: t.line,
-                start_col: t.start_col,
-                end_col: t.end_col,
-            })
-            .collect(),
-        rhs_tokens: result
-            .rhs_tokens
-            .iter()
-            .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
-            .map(|t| TokenOut {
-                line: t.line,
-                start_col: t.start_col,
-                end_col: t.end_col,
-            })
-            .collect(),
-    };
+        let out = DiffOut {
+            lhs_tokens: result
+                .lhs_tokens
+                .iter()
+                .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
+                .map(|t| TokenOut {
+                    line: t.line,
+                    start_col: t.start_col,
+                    end_col: t.end_col,
+                })
+                .collect(),
+            rhs_tokens: result
+                .rhs_tokens
+                .iter()
+                .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
+                .map(|t| TokenOut {
+                    line: t.line,
+                    start_col: t.start_col,
+                    end_col: t.end_col,
+                })
+                .collect(),
+        };
 
-    let json = serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string());
-    CString::new(json)
-        .map(|s| s.into_raw())
-        .unwrap_or(std::ptr::null_mut())
+        let json = serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string());
+        CString::new(json)
+            .map(|s| s.into_raw())
+            .unwrap_or(std::ptr::null_mut())
+    });
+
+    result.unwrap_or(std::ptr::null_mut())
 }
 
 /// Free a string returned by treediff_diff_tokens or treediff_diff_nodes.
