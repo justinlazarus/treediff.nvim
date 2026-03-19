@@ -388,10 +388,10 @@ fn collect_tokens<'a>(
         let change = change_map.get(node);
         match change {
             Some(ChangeKind::Novel) => {
-                add_node_tokens(node, TokenChange::Novel, tokens);
+                add_node_tokens(node, TokenChange::Novel, tokens, change_map);
             }
             Some(ChangeKind::ReplacedComment(_, _)) | Some(ChangeKind::ReplacedString(_, _)) => {
-                add_node_tokens(node, TokenChange::Novel, tokens);
+                add_node_tokens(node, TokenChange::Novel, tokens, change_map);
             }
             Some(ChangeKind::Unchanged(_)) => {
                 match node {
@@ -421,7 +421,27 @@ fn collect_tokens<'a>(
 }
 
 /// Add all spans of a syntax node (and its descendants) as tokens.
-fn add_node_tokens(node: &Syntax, kind: TokenChange, tokens: &mut Vec<TokenInfo>) {
+/// Respects the change map: if a descendant has its own change entry,
+/// that takes priority over the inherited kind.
+fn add_node_tokens<'a>(
+    node: &'a Syntax<'a>,
+    kind: TokenChange,
+    tokens: &mut Vec<TokenInfo>,
+    change_map: &ChangeMap<'a>,
+) {
+    use crate::diff::changes::ChangeKind;
+
+    // If this node has its own change map entry, use that instead
+    // of the inherited kind.
+    let effective_kind = match change_map.get(node) {
+        Some(ChangeKind::Unchanged(_)) => TokenChange::Unchanged,
+        Some(ChangeKind::Novel) => TokenChange::Novel,
+        Some(ChangeKind::ReplacedComment(_, _)) | Some(ChangeKind::ReplacedString(_, _)) => {
+            TokenChange::Novel
+        }
+        None => kind.clone(),
+    };
+
     match node {
         Syntax::Atom { position, .. } => {
             for span in position {
@@ -429,7 +449,7 @@ fn add_node_tokens(node: &Syntax, kind: TokenChange, tokens: &mut Vec<TokenInfo>
                     line: span.line.0 as usize,
                     start_col: span.start_col as usize,
                     end_col: span.end_col as usize,
-                    kind: kind.clone(),
+                    kind: effective_kind.clone(),
                 });
             }
         }
@@ -444,18 +464,18 @@ fn add_node_tokens(node: &Syntax, kind: TokenChange, tokens: &mut Vec<TokenInfo>
                     line: span.line.0 as usize,
                     start_col: span.start_col as usize,
                     end_col: span.end_col as usize,
-                    kind: kind.clone(),
+                    kind: effective_kind.clone(),
                 });
             }
             for child in children {
-                add_node_tokens(child, kind.clone(), tokens);
+                add_node_tokens(child, effective_kind.clone(), tokens, change_map);
             }
             for span in close_position {
                 tokens.push(TokenInfo {
                     line: span.line.0 as usize,
                     start_col: span.start_col as usize,
                     end_col: span.end_col as usize,
-                    kind: kind.clone(),
+                    kind: effective_kind.clone(),
                 });
             }
         }
