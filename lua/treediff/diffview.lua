@@ -53,6 +53,10 @@ function M.open(file1, file2)
       pcall(function()
         require("ibl").setup_buffer(buf, { enabled = false })
       end)
+      -- Disable snacks.nvim indent if present
+      pcall(function()
+        require("snacks.indent").disable()
+      end)
     end
 
     highlight.attach(lhs_bufnr, rhs_bufnr)
@@ -77,6 +81,10 @@ function M.close()
     vim.o.fillchars = M._saved_fillchars
     M._saved_fillchars = nil
   end
+  -- Re-enable snacks.nvim indent if present
+  pcall(function()
+    require("snacks.indent").enable()
+  end)
 end
 
 --- Open a demo diff with sample code.
