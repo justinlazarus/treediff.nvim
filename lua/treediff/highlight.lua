@@ -75,14 +75,19 @@ local function parse_hunks(diff_str)
   return hunks
 end
 
---- Offset token positions by a line delta.
+--- Offset token positions by a line delta, filtering to a valid range.
+--- Only keeps tokens whose original (pre-offset) line falls within [min_line, max_line).
 --- @param tokens table[]
---- @param delta number
+--- @param delta number  Line offset to add
+--- @param min_line number  Minimum original line (inclusive, 0-indexed)
+--- @param max_line number  Maximum original line (exclusive, 0-indexed)
 --- @return table[]
-local function offset_tokens(tokens, delta)
+local function offset_tokens(tokens, delta, min_line, max_line)
   local out = {}
   for _, t in ipairs(tokens) do
-    out[#out + 1] = { line = t.line + delta, start_col = t.start_col, end_col = t.end_col }
+    if t.line >= min_line and t.line < max_line then
+      out[#out + 1] = { line = t.line + delta, start_col = t.start_col, end_col = t.end_col }
+    end
   end
   return out
 end
@@ -146,13 +151,23 @@ function M.apply(lhs_bufnr, rhs_bufnr)
     local lhs_chunk_text = table.concat(lhs_chunk, "\n")
     local rhs_chunk_text = table.concat(rhs_chunk, "\n")
 
+    -- The actual hunk range within the chunk (excluding context lines)
+    local lhs_hunk_start_in_chunk = hunk.lhs_start - lhs_start  -- 0-indexed line in chunk
+    local lhs_hunk_end_in_chunk = lhs_hunk_start_in_chunk + hunk.lhs_count
+    local rhs_hunk_start_in_chunk = hunk.rhs_start - rhs_start
+    local rhs_hunk_end_in_chunk = rhs_hunk_start_in_chunk + hunk.rhs_count
+
     local result = treediff.diff(lhs_chunk_text, rhs_chunk_text, lang)
     if result then
       if result.lhs_tokens then
-        place_marks(lhs_bufnr, offset_tokens(result.lhs_tokens, lhs_start), "TreeDiffDelete", "TreeDiffDeleteNr")
+        place_marks(lhs_bufnr,
+          offset_tokens(result.lhs_tokens, lhs_start, lhs_hunk_start_in_chunk, lhs_hunk_end_in_chunk),
+          "TreeDiffDelete", "TreeDiffDeleteNr")
       end
       if result.rhs_tokens then
-        place_marks(rhs_bufnr, offset_tokens(result.rhs_tokens, rhs_start), "TreeDiffAdd", "TreeDiffAddNr")
+        place_marks(rhs_bufnr,
+          offset_tokens(result.rhs_tokens, rhs_start, rhs_hunk_start_in_chunk, rhs_hunk_end_in_chunk),
+          "TreeDiffAdd", "TreeDiffAddNr")
       end
     end
 
