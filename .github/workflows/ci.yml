@@ -68,9 +68,14 @@ jobs:
           neovim: true
           version: v0.11.0
 
-      - name: Install tree-sitter parsers
+      - name: Install nvim-treesitter and parsers
         run: |
-          nvim --headless -c 'TSInstallSync rust lua python javascript c_sharp typescript css json yaml bash html toml sql kotlin tsx xml' -c 'qall' 2>/dev/null || true
+          # Clone nvim-treesitter into Neovim's pack directory
+          PACK_DIR="${HOME}/.local/share/nvim/site/pack/vendor/start/nvim-treesitter"
+          git clone --depth 1 https://github.com/nvim-treesitter/nvim-treesitter.git "${PACK_DIR}"
+
+          # Install parsers
+          nvim --headless -c 'TSInstallSync rust lua python javascript c_sharp typescript css json yaml bash html toml sql kotlin tsx xml' -c 'qall' 2>&1 || true
 
       - name: Run diffview tests
         run: nvim --headless -u tests/minimal_init.lua -l tests/test_diffview.lua
