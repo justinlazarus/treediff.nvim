@@ -319,7 +319,7 @@ function syntax_from_node(node, src, src_lines, config)
 end
 
 --- Ensure the tree-sitter parser for a language is available.
---- Searches common nvim-treesitter parser directories and loads the .so if found.
+--- Searches runtimepath and packpath for parser .so files.
 --- @param lang string
 --- @return boolean
 local function ensure_parser(lang)
@@ -328,27 +328,29 @@ local function ensure_parser(lang)
   local ok = pcall(vim.treesitter.get_string_parser, "", lang)
   if ok then return true end
 
-  -- Search common nvim-treesitter parser directories
-  local home = vim.env.HOME or ""
-  local search_dirs = {
-    home .. "/.local/share/nvim/site/pack/core/opt/nvim-treesitter/parser",
-    home .. "/.local/share/nvim/site/pack/packer/start/nvim-treesitter/parser",
-    home .. "/.local/share/nvim/lazy/nvim-treesitter/parser",
-  }
-
-  for _, dir in ipairs(search_dirs) do
-    local path = dir .. "/" .. lang .. ".so"
-    if vim.fn.filereadable(path) == 1 then
-      local ok2 = pcall(vim.treesitter.language.add, lang, { path = path })
-      if ok2 then return true end
-    end
-  end
-
-  -- Try via runtime path search
+  -- Search via runtime files (covers all rtp entries)
   local paths = vim.api.nvim_get_runtime_file("parser/" .. lang .. ".so", true)
   for _, path in ipairs(paths) do
     local ok2 = pcall(vim.treesitter.language.add, lang, { path = path })
     if ok2 then return true end
+  end
+
+  -- Search packpath directories for nvim-treesitter parser directories
+  -- This catches all plugin managers (lazy, packer, vim-plug, start/, opt/)
+  local so_name = lang .. ".so"
+  for _, pp in ipairs(vim.opt.packpath:get()) do
+    local glob = pp .. "/pack/*/start/nvim-treesitter/parser/" .. so_name
+    local found = vim.fn.glob(glob, true, true)
+    for _, path in ipairs(found) do
+      local ok2 = pcall(vim.treesitter.language.add, lang, { path = path })
+      if ok2 then return true end
+    end
+    glob = pp .. "/pack/*/opt/nvim-treesitter/parser/" .. so_name
+    found = vim.fn.glob(glob, true, true)
+    for _, path in ipairs(found) do
+      local ok2 = pcall(vim.treesitter.language.add, lang, { path = path })
+      if ok2 then return true end
+    end
   end
 
   return false
