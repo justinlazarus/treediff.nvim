@@ -41,14 +41,9 @@ function M.open(file1, file2)
     vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
     vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
 
-    -- Cursorline: background only, no underline.
-    -- Use a private highlight + per-window winhl to avoid colorscheme overrides.
+    -- Cursorline: background only.
     M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
-    -- Neovim bug #9800: CursorLine gets unwanted underline in diff regions
-    -- when guifg is unset. Workaround: set fg to the Normal text color.
-    local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal" })
-    local normal_fg = normal_hl.fg and string.format("#%06x", normal_hl.fg) or "#cdd6f4"
-    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { fg = normal_fg, bg = "#313244" })
+    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { bg = "#313244" })
 
     -- Apply token highlights BEFORE stripping filetype (highlight needs it)
     highlight.attach(lhs_bufnr, rhs_bufnr)
@@ -65,10 +60,18 @@ function M.open(file1, file2)
       vim.bo[buf].filetype = ""
 
       -- Window options: cursorline on, nothing else.
-      -- Neovim bug #9800: CursorLine gets unwanted underline in diff regions
-      -- when guifg is unset. Workaround: set fg to Normal's fg color.
+      -- Map Diff highlights to NONE via winhighlight so Neovim's renderer
+      -- doesn't see diff regions — this avoids bug #9800 (unwanted underline
+      -- on CursorLine inside diff regions when guifg is unset).
       vim.wo[win].cursorline = true
-      vim.wo[win].winhighlight = "CursorLine:TreeDiffCursorLine,CursorLineNr:TreeDiffCursorLine"
+      vim.wo[win].winhighlight = table.concat({
+        "CursorLine:TreeDiffCursorLine",
+        "CursorLineNr:TreeDiffCursorLine",
+        "DiffAdd:NONE",
+        "DiffChange:NONE",
+        "DiffDelete:NONE",
+        "DiffText:NONE",
+      }, ",")
       vim.wo[win].signcolumn = "no"
       vim.wo[win].foldcolumn = "0"
       vim.wo[win].colorcolumn = ""
