@@ -39,12 +39,16 @@ function M.open(file1, file2)
     vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true })
     vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true })
 
-    -- Disable tree-sitter, vim syntax, cursorline, indent guides
+    -- Cursorline: background only, no underline
+    M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
+    vim.api.nvim_set_hl(0, "CursorLine", { bg = "#313244", underline = false })
+
+    -- Disable tree-sitter, vim syntax, indent guides
     for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       local buf = vim.api.nvim_win_get_buf(win)
       pcall(vim.treesitter.stop, buf)
       vim.bo[buf].syntax = ""
-      vim.wo[win].cursorline = false
+      vim.wo[win].cursorline = true
       -- Disable indent-blankline / ibl if present
       pcall(function()
         require("ibl").setup_buffer(buf, { enabled = false })
