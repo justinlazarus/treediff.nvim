@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: libtreediff.dylib
+            output: treediff_native.so
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: libtreediff.dylib
+            output: treediff_native_x86.so
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: libtreediff.so
+            output: treediff_native_linux.so
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build native library
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Copy binary
+        run: cp target/${{ matrix.target }}/release/${{ matrix.artifact }} lib/${{ matrix.output }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: lib/${{ matrix.output }}
+
+  test:
+    needs: build
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: native-aarch64-apple-darwin
+          path: lib/
+
+      - name: Rename binary
+        run: cp lib/treediff_native.so lib/treediff_native.so || true
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.11.0
+
+      - name: Install tree-sitter parsers
+        run: |
+          nvim --headless -c 'TSInstallSync rust lua python javascript c_sharp typescript css json yaml bash html toml sql kotlin tsx xml' -c 'qall' 2>/dev/null || true
+
+      - name: Run diffview tests
+        run: nvim --headless -u tests/minimal_init.lua -l tests/test_diffview.lua
+
+      - name: Run parity tests
+        run: nvim --headless -u tests/minimal_init.lua -l tests/test_difft_parity.lua
+
+  release:
+    if: github.ref == 'refs/heads/master'
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare binaries
+        run: |
+          cp artifacts/native-aarch64-apple-darwin/treediff_native.so lib/treediff_native.so
+          cp artifacts/native-x86_64-apple-darwin/treediff_native_x86.so lib/treediff_native_x86.so
+          cp artifacts/native-x86_64-unknown-linux-gnu/treediff_native_linux.so lib/treediff_native_linux.so
+
+      - name: Commit binaries
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lib/
+          git diff --staged --quiet || git commit -m "Update pre-built binaries [ci skip]"
+          git push

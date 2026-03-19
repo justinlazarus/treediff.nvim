@@ -34,17 +34,17 @@ Lua: vim.treesitter.get_string_parser(src, lang)
 
 ## Comprehensive Testing
 
-Current: **18 passing tests** (8 diffview UI + 10 parity/unit).
+Current: **31 passing tests** (8 diffview UI + 23 parity/unit).
 
 Tests cover:
 - Library loading, diff API, token format validation
 - UI: TreeDiff/TreeDiffOff commands, extmark placement/cleanup
-- Token-level correctness: Rust, Lua, Python, JavaScript diffs
+- Token-level correctness across 12 languages: Rust, Lua, Python, JavaScript, C#, TypeScript, CSS, JSON, YAML, Bash, HTML, TOML, SQL, Kotlin, TSX, XML
 - tree_walker: JSON output validity, empty input handling
 - Zero-width token filtering, identical file detection
+- diffexpr integration (treediff_diff_files produces valid ed-style output)
 
 Still needed:
-- **More language coverage**: C#, Go, TypeScript, etc.
 - **Regression fixtures**: saved expected outputs for known inputs
 - **Automated difft comparison**: script to compare with `difft` output
 

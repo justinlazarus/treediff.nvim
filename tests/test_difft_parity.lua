@@ -224,6 +224,223 @@ test("JavaScript: function change", function()
   assert(#result.rhs_tokens > 0, "expected RHS novel tokens for added parameter")
 end)
 
+-- Test 11: C# diff
+test("C#: class change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "using System;\nclass Foo {\n    public int X { get; set; }\n}"
+  local rhs = "using System;\nusing System.Linq;\nclass Foo {\n    public int X { get; set; }\n    public string Y { get; set; }\n}"
+  local json = tw.parse_to_json(lhs, "c_sharp")
+  if not json then
+    io.write("    (skipped: c_sharp parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "c_sharp")
+  assert(result, "diff returned nil for C#")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens for added property")
+end)
+
+-- Test 12: TypeScript diff
+test("TypeScript: interface change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "interface User {\n  name: string;\n}"
+  local rhs = "interface User {\n  name: string;\n  age: number;\n}"
+  local json = tw.parse_to_json(lhs, "typescript")
+  if not json then
+    io.write("    (skipped: typescript parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "typescript")
+  assert(result, "diff returned nil for TypeScript")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 13: CSS diff
+test("CSS: rule change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "body {\n  color: red;\n}"
+  local rhs = "body {\n  color: blue;\n  font-size: 14px;\n}"
+  local json = tw.parse_to_json(lhs, "css")
+  if not json then
+    io.write("    (skipped: css parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "css")
+  assert(result, "diff returned nil for CSS")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+  assert(#result.lhs_tokens > 0, "expected LHS novel tokens for changed color")
+end)
+
+-- Test 14: JSON diff
+test("JSON: object change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = '{"name": "Alice", "age": 30}'
+  local rhs = '{"name": "Alice", "age": 31, "email": "alice@example.com"}'
+  local json = tw.parse_to_json(lhs, "json")
+  if not json then
+    io.write("    (skipped: json parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "json")
+  assert(result, "diff returned nil for JSON")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 15: YAML diff
+test("YAML: key change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "name: Alice\nage: 30"
+  local rhs = "name: Alice\nage: 31\nemail: alice@example.com"
+  local json = tw.parse_to_json(lhs, "yaml")
+  if not json then
+    io.write("    (skipped: yaml parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "yaml")
+  assert(result, "diff returned nil for YAML")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 16: Bash diff
+test("Bash: function change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "#!/bin/bash\ngreet() {\n  echo \"hello\"\n}"
+  local rhs = "#!/bin/bash\ngreet() {\n  echo \"hi $1\"\n}"
+  local json = tw.parse_to_json(lhs, "bash")
+  if not json then
+    io.write("    (skipped: bash parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "bash")
+  assert(result, "diff returned nil for Bash")
+  assert(#result.lhs_tokens > 0 or #result.rhs_tokens > 0, "expected novel tokens")
+end)
+
+-- Test 17: HTML diff
+test("HTML: element change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "<div>\n  <p>Hello</p>\n</div>"
+  local rhs = "<div>\n  <p>Hello</p>\n  <span>World</span>\n</div>"
+  local json = tw.parse_to_json(lhs, "html")
+  if not json then
+    io.write("    (skipped: html parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "html")
+  assert(result, "diff returned nil for HTML")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 18: TOML diff
+test("TOML: key change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = '[package]\nname = "foo"\nversion = "0.1.0"'
+  local rhs = '[package]\nname = "foo"\nversion = "0.2.0"\nedition = "2021"'
+  local json = tw.parse_to_json(lhs, "toml")
+  if not json then
+    io.write("    (skipped: toml parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "toml")
+  assert(result, "diff returned nil for TOML")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 19: SQL diff
+test("SQL: query change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "SELECT name FROM users WHERE active = 1;"
+  local rhs = "SELECT name, email FROM users WHERE active = 1 ORDER BY name;"
+  local json = tw.parse_to_json(lhs, "sql")
+  if not json then
+    io.write("    (skipped: sql parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "sql")
+  assert(result, "diff returned nil for SQL")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 20: Kotlin diff
+test("Kotlin: class change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "data class User(val name: String)"
+  local rhs = "data class User(val name: String, val age: Int)"
+  local json = tw.parse_to_json(lhs, "kotlin")
+  if not json then
+    io.write("    (skipped: kotlin parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "kotlin")
+  assert(result, "diff returned nil for Kotlin")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 21: TSX diff
+test("TSX: component change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "function App() {\n  return <div>Hello</div>;\n}"
+  local rhs = "function App() {\n  return <div>Hello <span>World</span></div>;\n}"
+  local json = tw.parse_to_json(lhs, "tsx")
+  if not json then
+    io.write("    (skipped: tsx parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "tsx")
+  assert(result, "diff returned nil for TSX")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 22: XML diff
+test("XML: element change", function()
+  local tw = require("treediff.tree_walker")
+  local lhs = "<root>\n  <item>A</item>\n</root>"
+  local rhs = "<root>\n  <item>A</item>\n  <item>B</item>\n</root>"
+  local json = tw.parse_to_json(lhs, "xml")
+  if not json then
+    io.write("    (skipped: xml parser not available)\n")
+    return
+  end
+  local td = require("treediff")
+  local result = td.diff(lhs, rhs, "xml")
+  assert(result, "diff returned nil for XML")
+  assert(#result.rhs_tokens > 0, "expected RHS novel tokens")
+end)
+
+-- Test 23: diffexpr integration (structural_diff produces ed-style output)
+test("diffexpr: structural_diff via treediff_diff_files", function()
+  local td = require("treediff")
+  local native = td._native
+  assert(native, "native library not loaded")
+
+  local f1 = vim.fn.tempname() .. ".rs"
+  local f2 = vim.fn.tempname() .. ".rs"
+  local fout = vim.fn.tempname()
+  vim.fn.writefile({"fn main() {", "    let x = 1;", "}"}, f1)
+  vim.fn.writefile({"fn main() {", "    let x = 42;", "    let y = 2;", "}"}, f2)
+
+  native.treediff_diff_files(f1, f2, fout)
+
+  local output = table.concat(vim.fn.readfile(fout), "\n")
+  -- Should produce some ed-style output (contains 'c' or 'a' or 'd' commands)
+  assert(output ~= "", "diffexpr produced empty output")
+  assert(output:match("[acd]"), "diffexpr output missing ed-style commands: " .. output)
+
+  os.remove(f1)
+  os.remove(f2)
+  os.remove(fout)
+end)
+
 -- Summary
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then

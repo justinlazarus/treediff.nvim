@@ -13,12 +13,24 @@ local lib
 local function load_lib()
   if lib then return lib end
 
+  -- Platform-specific binary names
+  local sysname = vim.uv.os_uname().sysname
+  local machine = vim.uv.os_uname().machine
+  local names = { "treediff_native.so" } -- default (macOS arm64)
+  if sysname == "Linux" then
+    names = { "treediff_native_linux.so", "treediff_native.so" }
+  elseif sysname == "Darwin" and (machine == "x86_64" or machine == "i386") then
+    names = { "treediff_native_x86.so", "treediff_native.so" }
+  end
+
   -- Find the native lib by searching runtimepath
   local candidates = {}
   for _, rtp in ipairs(vim.api.nvim_list_runtime_paths()) do
-    table.insert(candidates, rtp .. "/lib/treediff_native.so")
-    table.insert(candidates, rtp .. "/lib/treediff_native.dylib")
+    for _, name in ipairs(names) do
+      table.insert(candidates, rtp .. "/lib/" .. name)
+    end
     table.insert(candidates, rtp .. "/target/release/libtreediff.dylib")
+    table.insert(candidates, rtp .. "/target/release/libtreediff.so")
   end
   for _, candidate in ipairs(candidates) do
     if vim.fn.filereadable(candidate) == 1 then
