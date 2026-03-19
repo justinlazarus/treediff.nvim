@@ -44,7 +44,7 @@ function M.open(file1, file2)
     -- Cursorline: background only, no underline.
     -- Use a private highlight + per-window winhl to avoid colorscheme overrides.
     M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
-    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { bg = "#313244" })
+    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { bg = "#313244", underline = false, undercurl = false, underdashed = false, underdotted = false, strikethrough = false })
 
     -- Apply token highlights BEFORE stripping filetype (highlight needs it)
     highlight.attach(lhs_bufnr, rhs_bufnr)
