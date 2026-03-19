@@ -6,8 +6,11 @@ use typed_arena::Arena;
 
 use crate::diff::changes::ChangeMap;
 use crate::diff::dijkstra;
+use crate::diff::sliders::fix_all_sliders;
 use crate::diff::unchanged::mark_unchanged;
-use crate::parse::syntax::{init_all_info, Syntax};
+use crate::parse::json_deserialize;
+use crate::parse::language::Language;
+use crate::parse::syntax::{init_all_info, init_next_prev, Syntax};
 use crate::parse::tree_sitter_converter;
 
 /// Load a tree-sitter language grammar from a .so file.
@@ -26,11 +29,57 @@ pub fn load_language(parser_path: &Path, lang_name: &str) -> Option<tree_sitter:
     Some(lang)
 }
 
+/// Map tree-sitter language name to difftastic Language enum.
+fn lang_name_to_language(name: &str) -> Language {
+    match name {
+        "bash" => Language::Bash,
+        "c" => Language::C,
+        "cmake" => Language::CMake,
+        "cpp" => Language::CPlusPlus,
+        "c_sharp" => Language::CSharp,
+        "css" => Language::Css,
+        "dart" => Language::Dart,
+        "elixir" => Language::Elixir,
+        "elm" => Language::Elm,
+        "erlang" => Language::Erlang,
+        "go" => Language::Go,
+        "haskell" => Language::Haskell,
+        "hcl" => Language::Hcl,
+        "html" => Language::Html,
+        "java" => Language::Java,
+        "javascript" => Language::JavaScript,
+        "json" => Language::Json,
+        "julia" => Language::Julia,
+        "kotlin" => Language::Kotlin,
+        "lua" => Language::Lua,
+        "nix" => Language::Nix,
+        "ocaml" => Language::OCaml,
+        "perl" => Language::Perl,
+        "php" => Language::Php,
+        "python" => Language::Python,
+        "r" => Language::R,
+        "ruby" => Language::Ruby,
+        "rust" => Language::Rust,
+        "scala" => Language::Scala,
+        "scheme" => Language::Scheme,
+        "scss" => Language::Scss,
+        "sql" => Language::Sql,
+        "swift" => Language::Swift,
+        "toml" => Language::Toml,
+        "typescript" => Language::TypeScript,
+        "tsx" => Language::TypeScriptTsx,
+        "yaml" => Language::Yaml,
+        "zig" => Language::Zig,
+        _ => Language::Rust,
+    }
+}
+
 /// Parse source code with a tree-sitter language into difftastic Syntax nodes.
 pub fn parse_to_syntax<'a>(
     src: &str,
     language: tree_sitter::Language,
     arena: &'a Arena<Syntax<'a>>,
+    lang_name: &str,
 ) -> Vec<&'a Syntax<'a>> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&language).ok();
@@ -38,7 +87,7 @@ pub fn parse_to_syntax<'a>(
         Some(t) => t,
         None => return vec![],
     };
-    tree_sitter_converter::to_syntax(&tree, src, arena)
+    tree_sitter_converter::to_syntax(&tree, src, arena, lang_name)
 }
 
 /// Run the full difftastic pipeline on two source strings.
@@ -46,6 +95,7 @@ pub fn parse_to_syntax<'a>(
 pub fn diff_syntaxes<'a>(
     lhs_nodes: &[&'a Syntax<'a>],
     rhs_nodes: &[&'a Syntax<'a>],
+    lang: Language,
 ) -> ChangeMap<'a> {
     let mut change_map = ChangeMap::default();
 
@@ -57,12 +107,19 @@ pub fn diff_syntaxes<'a>(
     let pairs = mark_unchanged(lhs_nodes, rhs_nodes, &mut change_map);
 
     // Run Dijkstra on each remaining pair.
-    let graph_limit = 1_000_000;
+    let graph_limit = 3_000_000;
     for (lhs_section, rhs_section) in &pairs {
+        init_next_prev(lhs_section);
+        init_next_prev(rhs_section);
+
         let lhs_root = lhs_section.first().copied();
         let rhs_root = rhs_section.first().copied();
         let _ = dijkstra::mark_syntax(lhs_root, rhs_root, &mut change_map, graph_limit);
     }
+
+    // Post-process: fix slider positions for readability.
+    fix_all_sliders(lang, lhs_nodes, &mut change_map);
+    fix_all_sliders(lang, rhs_nodes, &mut change_map);
 
     change_map
 }
@@ -73,19 +130,21 @@ pub fn structural_diff(
     old_src: &str,
     new_src: &str,
     language: Option<tree_sitter::Language>,
+    lang_name: &str,
 ) -> String {
     if let Some(lang) = language {
         let lhs_arena = Arena::new();
         let rhs_arena = Arena::new();
 
-        let lhs_nodes = parse_to_syntax(old_src, lang.clone(), &lhs_arena);
-        let rhs_nodes = parse_to_syntax(new_src, lang, &rhs_arena);
+        let lhs_nodes = parse_to_syntax(old_src, lang.clone(), &lhs_arena, lang_name);
+        let rhs_nodes = parse_to_syntax(new_src, lang, &rhs_arena, lang_name);
 
         if !lhs_nodes.is_empty() || !rhs_nodes.is_empty() {
             // Initialize all syntax node metadata (IDs, parents, siblings)
             init_all_info(&lhs_nodes, &rhs_nodes);
 
-            let change_map = diff_syntaxes(&lhs_nodes, &rhs_nodes);
+            let diff_lang = lang_name_to_language(lang_name);
+            let change_map = diff_syntaxes(&lhs_nodes, &rhs_nodes, diff_lang);
 
             // Convert to line-level pairings and produce ed-style output
             return change_map_to_ed_diff(old_src, new_src, &lhs_nodes, &rhs_nodes, &change_map);
@@ -210,8 +269,10 @@ fn change_map_to_ed_diff<'a>(
     let mut ni = 0usize; // position in new
 
     while oi < old_lines.len() || ni < new_lines.len() {
-        if oi < old_lines.len() && ni < new_lines.len()
-            && !lhs_novel.contains(&oi) && !rhs_novel.contains(&ni)
+        if oi < old_lines.len()
+            && ni < new_lines.len()
+            && !lhs_novel.contains(&oi)
+            && !rhs_novel.contains(&ni)
         {
             // Both lines unchanged — advance
             oi += 1;
@@ -329,8 +390,7 @@ fn collect_tokens<'a>(
             Some(ChangeKind::Novel) => {
                 add_node_tokens(node, TokenChange::Novel, tokens);
             }
-            Some(ChangeKind::ReplacedComment(_, _))
-            | Some(ChangeKind::ReplacedString(_, _)) => {
+            Some(ChangeKind::ReplacedComment(_, _)) | Some(ChangeKind::ReplacedString(_, _)) => {
                 add_node_tokens(node, TokenChange::Novel, tokens);
             }
             Some(ChangeKind::Unchanged(_)) => {
@@ -408,20 +468,57 @@ pub fn diff_tokens(
     old_src: &str,
     new_src: &str,
     language: Option<tree_sitter::Language>,
+    lang_name: &str,
 ) -> Option<DiffResult> {
     let lang = language?;
     let lhs_arena = Arena::new();
     let rhs_arena = Arena::new();
 
-    let lhs_nodes = parse_to_syntax(old_src, lang.clone(), &lhs_arena);
-    let rhs_nodes = parse_to_syntax(new_src, lang, &rhs_arena);
+    let lhs_nodes = parse_to_syntax(old_src, lang.clone(), &lhs_arena, lang_name);
+    let rhs_nodes = parse_to_syntax(new_src, lang, &rhs_arena, lang_name);
 
     if lhs_nodes.is_empty() && rhs_nodes.is_empty() {
         return None;
     }
 
     init_all_info(&lhs_nodes, &rhs_nodes);
-    let change_map = diff_syntaxes(&lhs_nodes, &rhs_nodes);
+
+    let diff_lang = lang_name_to_language(lang_name);
+    let change_map = diff_syntaxes(&lhs_nodes, &rhs_nodes, diff_lang);
+
+    let mut lhs_tokens = Vec::new();
+    let mut rhs_tokens = Vec::new();
+
+    collect_tokens(&lhs_nodes, &change_map, &mut lhs_tokens);
+    collect_tokens(&rhs_nodes, &change_map, &mut rhs_tokens);
+
+    Some(DiffResult {
+        lhs_tokens,
+        rhs_tokens,
+    })
+}
+
+/// Compute a structural diff from pre-built JSON syntax trees.
+/// The JSON is produced by Lua's tree_walker.lua using vim.treesitter.
+pub fn diff_tokens_from_json(
+    lhs_json: &str,
+    rhs_json: &str,
+    lang_name: &str,
+) -> Option<DiffResult> {
+    let lhs_arena = Arena::new();
+    let rhs_arena = Arena::new();
+
+    let lhs_nodes = json_deserialize::json_to_syntax(lhs_json, &lhs_arena);
+    let rhs_nodes = json_deserialize::json_to_syntax(rhs_json, &rhs_arena);
+
+    if lhs_nodes.is_empty() && rhs_nodes.is_empty() {
+        return None;
+    }
+
+    init_all_info(&lhs_nodes, &rhs_nodes);
+
+    let diff_lang = lang_name_to_language(lang_name);
+    let change_map = diff_syntaxes(&lhs_nodes, &rhs_nodes, diff_lang);
 
     let mut lhs_tokens = Vec::new();
     let mut rhs_tokens = Vec::new();

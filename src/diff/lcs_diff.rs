@@ -18,10 +18,7 @@ pub enum DiffResult<T> {
 }
 
 /// Compute a linear diff between `lhs` and `rhs`.
-pub fn slice<'a, T: PartialEq + Clone>(
-    lhs: &'a [T],
-    rhs: &'a [T],
-) -> Vec<DiffResult<&'a T>> {
+pub fn slice<'a, T: PartialEq + Clone>(lhs: &'a [T], rhs: &'a [T]) -> Vec<DiffResult<&'a T>> {
     wu_diff::diff(lhs, rhs)
         .into_iter()
         .map(|result| match result {
@@ -41,10 +38,7 @@ pub fn slice<'a, T: PartialEq + Clone>(
 ///
 /// This is faster when equality checks on `T` are expensive, such as
 /// large strings.
-pub fn slice_by_hash<'a, T: Eq + Hash>(
-    lhs: &'a [T],
-    rhs: &'a [T],
-) -> Vec<DiffResult<&'a T>> {
+pub fn slice_by_hash<'a, T: Eq + Hash>(lhs: &'a [T], rhs: &'a [T]) -> Vec<DiffResult<&'a T>> {
     // Compute a unique numeric value for each item, use that for
     // diffing, then return diff results in terms of the original
     // type.

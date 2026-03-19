@@ -1,6 +1,10 @@
 // No-op logging macros (difftastic uses log crate, we don't need it)
-macro_rules! info { ($($arg:tt)*) => {} }
-macro_rules! debug { ($($arg:tt)*) => {} }
+macro_rules! info {
+    ($($arg:tt)*) => {};
+}
+macro_rules! debug {
+    ($($arg:tt)*) => {};
+}
 
 mod diff;
 mod hash;
@@ -18,16 +22,32 @@ fn detect_language(file_path: &str) -> Option<(String, PathBuf)> {
     let ext = std::path::Path::new(file_path).extension()?.to_str()?;
 
     let lang_name = match ext {
-        "rs" => "rust", "lua" => "lua", "py" => "python",
-        "js" => "javascript", "jsx" => "javascript",
-        "ts" => "typescript", "tsx" => "tsx",
-        "c" | "h" => "c", "cpp" | "cc" | "cxx" | "hpp" | "hh" => "cpp",
-        "cs" => "c_sharp", "go" => "go", "java" => "java",
-        "rb" => "ruby", "sh" | "bash" => "bash",
-        "json" => "json", "yaml" | "yml" => "yaml", "toml" => "toml",
-        "html" | "htm" => "html", "css" => "css", "scss" => "scss",
-        "md" => "markdown", "sql" => "sql", "swift" => "swift",
-        "kt" | "kts" => "kotlin", "dart" => "dart", "zig" => "zig",
+        "rs" => "rust",
+        "lua" => "lua",
+        "py" => "python",
+        "js" => "javascript",
+        "jsx" => "javascript",
+        "ts" => "typescript",
+        "tsx" => "tsx",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" => "cpp",
+        "cs" => "c_sharp",
+        "go" => "go",
+        "java" => "java",
+        "rb" => "ruby",
+        "sh" | "bash" => "bash",
+        "json" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "scss" => "scss",
+        "md" => "markdown",
+        "sql" => "sql",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "dart" => "dart",
+        "zig" => "zig",
         "ex" | "exs" => "elixir",
         _ => return None,
     };
@@ -39,7 +59,9 @@ fn detect_language(file_path: &str) -> Option<(String, PathBuf)> {
         "lazy/nvim-treesitter/parser",
     ];
     for subpath in &search_dirs {
-        let p = PathBuf::from(&home).join(".local/share/nvim").join(subpath)
+        let p = PathBuf::from(&home)
+            .join(".local/share/nvim")
+            .join(subpath)
             .join(format!("{}.so", lang_name));
         if p.exists() {
             return Some((lang_name.to_string(), p));
@@ -64,11 +86,15 @@ pub extern "C" fn treediff_diff_files(
     let old_content = std::fs::read_to_string(old_path).unwrap_or_default();
     let new_content = std::fs::read_to_string(new_path).unwrap_or_default();
 
-    let language = detect_language(old_path)
-        .or_else(|| detect_language(new_path))
-        .and_then(|(name, parser_path)| treediff::load_language(&parser_path, &name));
+    let detected = detect_language(old_path).or_else(|| detect_language(new_path));
+    let lang_name_owned = detected
+        .as_ref()
+        .map(|(n, _)| n.clone())
+        .unwrap_or_default();
+    let language =
+        detected.and_then(|(name, parser_path)| treediff::load_language(&parser_path, &name));
 
-    let result = treediff::structural_diff(&old_content, &new_content, language);
+    let result = treediff::structural_diff(&old_content, &new_content, language, &lang_name_owned);
     std::fs::write(out_path, result).unwrap_or_default();
     0
 }
@@ -94,7 +120,9 @@ pub extern "C" fn treediff_diff_tokens(
     ];
     let mut language = None;
     for subpath in &search_dirs {
-        let p = PathBuf::from(&home).join(".local/share/nvim").join(subpath)
+        let p = PathBuf::from(&home)
+            .join(".local/share/nvim")
+            .join(subpath)
             .join(format!("{}.so", lang_name));
         if p.exists() {
             language = treediff::load_language(&p, lang_name);
@@ -102,7 +130,7 @@ pub extern "C" fn treediff_diff_tokens(
         }
     }
 
-    let result = match treediff::diff_tokens(old_src, new_src, language) {
+    let result = match treediff::diff_tokens(old_src, new_src, language, lang_name) {
         Some(r) => r,
         None => return std::ptr::null_mut(),
     };
@@ -121,24 +149,99 @@ pub extern "C" fn treediff_diff_tokens(
     }
 
     let out = DiffOut {
-        lhs_tokens: result.lhs_tokens.iter()
-            .filter(|t| t.kind == treediff::TokenChange::Novel)
-            .map(|t| TokenOut { line: t.line, start_col: t.start_col, end_col: t.end_col })
+        lhs_tokens: result
+            .lhs_tokens
+            .iter()
+            .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
+            .map(|t| TokenOut {
+                line: t.line,
+                start_col: t.start_col,
+                end_col: t.end_col,
+            })
             .collect(),
-        rhs_tokens: result.rhs_tokens.iter()
-            .filter(|t| t.kind == treediff::TokenChange::Novel)
-            .map(|t| TokenOut { line: t.line, start_col: t.start_col, end_col: t.end_col })
+        rhs_tokens: result
+            .rhs_tokens
+            .iter()
+            .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
+            .map(|t| TokenOut {
+                line: t.line,
+                start_col: t.start_col,
+                end_col: t.end_col,
+            })
             .collect(),
     };
 
     let json = serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string());
-    CString::new(json).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+    CString::new(json)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
 }
 
-/// Free a string returned by treediff_diff_tokens.
+/// Diff two pre-built syntax trees (JSON from Lua's tree_walker.lua).
+/// Returns JSON with token-level changes. Caller must free with treediff_free.
+#[no_mangle]
+pub extern "C" fn treediff_diff_nodes(
+    lhs_json: *const c_char,
+    rhs_json: *const c_char,
+    lang_name: *const c_char,
+) -> *mut c_char {
+    let lhs_json = unsafe { CStr::from_ptr(lhs_json) }.to_str().unwrap_or("[]");
+    let rhs_json = unsafe { CStr::from_ptr(rhs_json) }.to_str().unwrap_or("[]");
+    let lang_name = unsafe { CStr::from_ptr(lang_name) }.to_str().unwrap_or("");
+
+    let result = match treediff::diff_tokens_from_json(lhs_json, rhs_json, lang_name) {
+        Some(r) => r,
+        None => return std::ptr::null_mut(),
+    };
+
+    // Serialize to JSON — same format as treediff_diff_tokens
+    #[derive(serde::Serialize)]
+    struct TokenOut {
+        line: usize,
+        start_col: usize,
+        end_col: usize,
+    }
+    #[derive(serde::Serialize)]
+    struct DiffOut {
+        lhs_tokens: Vec<TokenOut>,
+        rhs_tokens: Vec<TokenOut>,
+    }
+
+    let out = DiffOut {
+        lhs_tokens: result
+            .lhs_tokens
+            .iter()
+            .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
+            .map(|t| TokenOut {
+                line: t.line,
+                start_col: t.start_col,
+                end_col: t.end_col,
+            })
+            .collect(),
+        rhs_tokens: result
+            .rhs_tokens
+            .iter()
+            .filter(|t| t.kind == treediff::TokenChange::Novel && t.end_col > t.start_col)
+            .map(|t| TokenOut {
+                line: t.line,
+                start_col: t.start_col,
+                end_col: t.end_col,
+            })
+            .collect(),
+    };
+
+    let json = serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string());
+    CString::new(json)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
+/// Free a string returned by treediff_diff_tokens or treediff_diff_nodes.
 #[no_mangle]
 pub extern "C" fn treediff_free(ptr: *mut c_char) {
     if !ptr.is_null() {
-        unsafe { drop(CString::from_raw(ptr)); }
+        unsafe {
+            drop(CString::from_raw(ptr));
+        }
     }
 }
