@@ -7,6 +7,8 @@ local ns = vim.api.nvim_create_namespace("treediff")
 -- Default highlight groups (user can override, diffview.lua sets these on open)
 vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true, default = true })
 vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true, default = true })
+vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true, default = true })
+vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true, default = true })
 
 local priority = 200
 
@@ -20,12 +22,14 @@ local function buf_lang(bufnr)
   return ft_map[ft] or ft
 end
 
---- Place extmarks for Novel tokens.
+--- Place extmarks for Novel tokens and color their line numbers.
 --- @param bufnr number
 --- @param tokens table[]  each { line, start_col, end_col }
 --- @param hl_group string
-local function place_marks(bufnr, tokens, hl_group)
+--- @param nr_hl_group string
+local function place_marks(bufnr, tokens, hl_group, nr_hl_group)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local nr_lines = {} -- track which lines already have a number highlight
   for _, tok in ipairs(tokens) do
     if tok.line < line_count then
       pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, tok.line, tok.start_col, {
@@ -33,6 +37,14 @@ local function place_marks(bufnr, tokens, hl_group)
         hl_group = hl_group,
         priority = priority,
       })
+      -- Color the line number (once per line)
+      if not nr_lines[tok.line] then
+        nr_lines[tok.line] = true
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, tok.line, 0, {
+          number_hl_group = nr_hl_group,
+          priority = priority,
+        })
+      end
     end
   end
 end
@@ -55,14 +67,11 @@ function M.apply(lhs_bufnr, rhs_bufnr)
   local result = treediff.diff(lhs_text, rhs_text, lang)
   if not result then return end
 
-  -- Bold red on deleted tokens (LHS), bold green on added tokens (RHS)
-  -- No filtering needed — the structural diff from Rust tells us exactly
-  -- which tokens are Novel. No background highlights to compete with.
   if result.lhs_tokens then
-    place_marks(lhs_bufnr, result.lhs_tokens, "TreeDiffDelete")
+    place_marks(lhs_bufnr, result.lhs_tokens, "TreeDiffDelete", "TreeDiffDeleteNr")
   end
   if result.rhs_tokens then
-    place_marks(rhs_bufnr, result.rhs_tokens, "TreeDiffAdd")
+    place_marks(rhs_bufnr, result.rhs_tokens, "TreeDiffAdd", "TreeDiffAddNr")
   end
 end
 

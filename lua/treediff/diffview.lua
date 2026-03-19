@@ -38,6 +38,8 @@ function M.open(file1, file2)
     -- Token highlights: bold red (deleted), bold green (added)
     vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true })
     vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true })
+    vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
+    vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
 
     -- Cursorline: background only, no underline
     M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
