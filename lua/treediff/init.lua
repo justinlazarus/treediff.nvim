@@ -77,11 +77,63 @@ function M.setup(opts)
   highlight.set_priority(M.config.priority)
 
   if M.config.auto_highlight then
+    -- Track state for restoring on diffoff
+    local saved_hl = nil
+
+    local function apply_diff_style(diff_wins)
+      -- Save and neutralize built-in diff highlights
+      if not saved_hl then
+        saved_hl = {
+          DiffText = vim.api.nvim_get_hl(0, { name = "DiffText" }),
+          DiffChange = vim.api.nvim_get_hl(0, { name = "DiffChange" }),
+          DiffAdd = vim.api.nvim_get_hl(0, { name = "DiffAdd" }),
+          DiffDelete = vim.api.nvim_get_hl(0, { name = "DiffDelete" }),
+        }
+      end
+      vim.api.nvim_set_hl(0, "DiffChange", {})
+      vim.api.nvim_set_hl(0, "DiffAdd", {})
+      vim.api.nvim_set_hl(0, "DiffText", {})
+      vim.api.nvim_set_hl(0, "DiffDelete", {})
+
+      -- Token + line number highlights
+      vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true })
+      vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true })
+      vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
+      vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
+
+      -- Blank filler lines (no dashes)
+      vim.opt.fillchars:append("diff: ")
+
+      -- Apply token highlights
+      local lhs = vim.api.nvim_win_get_buf(diff_wins[1])
+      local rhs = vim.api.nvim_win_get_buf(diff_wins[2])
+      highlight.attach(lhs, rhs)
+
+      -- Stop treesitter highlighting on diff buffers so token colors are clean
+      for _, win in ipairs(diff_wins) do
+        local buf = vim.api.nvim_win_get_buf(win)
+        pcall(vim.treesitter.stop, buf)
+        vim.bo[buf].syntax = ""
+      end
+    end
+
+    local function restore_diff_style()
+      if saved_hl then
+        for name, hl in pairs(saved_hl) do
+          vim.api.nvim_set_hl(0, name, hl)
+        end
+        saved_hl = nil
+      end
+      -- Clear treediff extmarks from all visible buffers
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        highlight.clear(vim.api.nvim_win_get_buf(win))
+      end
+    end
+
     vim.api.nvim_create_autocmd("OptionSet", {
       pattern = "diff",
       group = vim.api.nvim_create_augroup("treediff_auto", { clear = true }),
       callback = function()
-        if not vim.v.option_new then return end
         vim.schedule(function()
           local diff_wins = {}
           for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
@@ -89,10 +141,10 @@ function M.setup(opts)
               table.insert(diff_wins, win)
             end
           end
-          if #diff_wins == 2 then
-            local lhs = vim.api.nvim_win_get_buf(diff_wins[1])
-            local rhs = vim.api.nvim_win_get_buf(diff_wins[2])
-            highlight.attach(lhs, rhs)
+          if #diff_wins >= 2 then
+            apply_diff_style(diff_wins)
+          else
+            restore_diff_style()
           end
         end)
       end,
