@@ -41,9 +41,10 @@ function M.open(file1, file2)
     vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
     vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
 
-    -- Cursorline: background only, no underline
+    -- Cursorline: background only, no underline.
+    -- Use a private highlight + per-window winhl to avoid colorscheme overrides.
     M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
-    vim.api.nvim_set_hl(0, "CursorLine", { bg = "#313244", underline = false })
+    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { bg = "#313244" })
 
     -- Apply token highlights BEFORE stripping filetype (highlight needs it)
     highlight.attach(lhs_bufnr, rhs_bufnr)
@@ -61,6 +62,7 @@ function M.open(file1, file2)
 
       -- Window options: cursorline on, nothing else
       vim.wo[win].cursorline = true
+      vim.wo[win].winhighlight = "CursorLine:TreeDiffCursorLine"
       vim.wo[win].signcolumn = "no"
       vim.wo[win].foldcolumn = "0"
       vim.wo[win].colorcolumn = ""
