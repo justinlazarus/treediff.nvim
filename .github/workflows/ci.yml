@@ -68,6 +68,9 @@ jobs:
           neovim: true
           version: v0.11.0
 
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
       - name: Install nvim-treesitter and parsers
         run: |
           PACK_DIR="${HOME}/.local/share/nvim/site/pack/vendor/start/nvim-treesitter"
