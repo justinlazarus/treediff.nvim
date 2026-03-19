@@ -41,37 +41,18 @@ function M.open(file1, file2)
     vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
     vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
 
-    -- Cursorline: background only.
-    M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
-    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { bg = "#313244" })
-
     -- Apply token highlights BEFORE stripping filetype (highlight needs it)
     highlight.attach(lhs_bufnr, rhs_bufnr)
 
     -- Now make diff buffers completely plain — no plugins should decorate these.
-    -- Stripping filetype + syntax signals to virtually all plugins
-    -- (indent guides, linters, formatters, LSP, etc.) to leave the buffer alone.
     for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       local buf = vim.api.nvim_win_get_buf(win)
 
-      -- Kill all syntax/highlighting engines
       pcall(vim.treesitter.stop, buf)
       vim.bo[buf].syntax = ""
       vim.bo[buf].filetype = ""
 
-      -- Window options: cursorline on, nothing else.
-      -- Map Diff highlights to NONE via winhighlight so Neovim's renderer
-      -- doesn't see diff regions — this avoids bug #9800 (unwanted underline
-      -- on CursorLine inside diff regions when guifg is unset).
       vim.wo[win].cursorline = true
-      vim.wo[win].winhighlight = table.concat({
-        "CursorLine:TreeDiffCursorLine",
-        "CursorLineNr:TreeDiffCursorLine",
-        "DiffAdd:NONE",
-        "DiffChange:NONE",
-        "DiffDelete:NONE",
-        "DiffText:NONE",
-      }, ",")
       vim.wo[win].signcolumn = "no"
       vim.wo[win].foldcolumn = "0"
       vim.wo[win].colorcolumn = ""
