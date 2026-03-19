@@ -43,23 +43,30 @@ function M.open(file1, file2)
     M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
     vim.api.nvim_set_hl(0, "CursorLine", { bg = "#313244", underline = false })
 
-    -- Disable tree-sitter, vim syntax, indent guides
+    -- Apply token highlights BEFORE stripping filetype (highlight needs it)
+    highlight.attach(lhs_bufnr, rhs_bufnr)
+
+    -- Now make diff buffers completely plain — no plugins should decorate these.
+    -- Stripping filetype + syntax signals to virtually all plugins
+    -- (indent guides, linters, formatters, LSP, etc.) to leave the buffer alone.
     for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       local buf = vim.api.nvim_win_get_buf(win)
+
+      -- Kill all syntax/highlighting engines
       pcall(vim.treesitter.stop, buf)
       vim.bo[buf].syntax = ""
-      vim.wo[win].cursorline = true
-      -- Disable indent-blankline / ibl if present
-      pcall(function()
-        require("ibl").setup_buffer(buf, { enabled = false })
-      end)
-      -- Disable snacks.nvim indent if present
-      pcall(function()
-        require("snacks.indent").disable()
-      end)
-    end
+      vim.bo[buf].filetype = ""
 
-    highlight.attach(lhs_bufnr, rhs_bufnr)
+      -- Window options: cursorline on, nothing else
+      vim.wo[win].cursorline = true
+      vim.wo[win].signcolumn = "no"
+      vim.wo[win].foldcolumn = "0"
+      vim.wo[win].colorcolumn = ""
+      vim.wo[win].spell = false
+      vim.wo[win].list = false
+      vim.wo[win].number = true
+      vim.wo[win].relativenumber = false
+    end
   end)
 end
 
@@ -81,10 +88,6 @@ function M.close()
     vim.o.fillchars = M._saved_fillchars
     M._saved_fillchars = nil
   end
-  -- Re-enable snacks.nvim indent if present
-  pcall(function()
-    require("snacks.indent").enable()
-  end)
 end
 
 --- Open a demo diff with sample code.
