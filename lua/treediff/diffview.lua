@@ -62,10 +62,11 @@ function M.open(file1, file2)
 
       -- Window options: cursorline on, nothing else
       vim.wo[win].cursorline = true
-      vim.wo[win].winhighlight = "CursorLine:TreeDiffCursorLine"
+      vim.wo[win].winhighlight = "CursorLine:TreeDiffCursorLine,CursorLineNr:TreeDiffCursorLine"
       vim.wo[win].signcolumn = "no"
       vim.wo[win].foldcolumn = "0"
       vim.wo[win].colorcolumn = ""
+      vim.wo[win].statuscolumn = ""
       vim.wo[win].spell = false
       vim.wo[win].list = false
       vim.wo[win].number = true
