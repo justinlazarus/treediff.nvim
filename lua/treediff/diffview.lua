@@ -44,7 +44,11 @@ function M.open(file1, file2)
     -- Cursorline: background only, no underline.
     -- Use a private highlight + per-window winhl to avoid colorscheme overrides.
     M._saved_hl.CursorLine = vim.api.nvim_get_hl(0, { name = "CursorLine" })
-    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { bg = "#313244", underline = false, undercurl = false, underdashed = false, underdotted = false, strikethrough = false })
+    -- Neovim bug #9800: CursorLine gets unwanted underline in diff regions
+    -- when guifg is unset. Workaround: set fg to the Normal text color.
+    local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal" })
+    local normal_fg = normal_hl.fg and string.format("#%06x", normal_hl.fg) or "#cdd6f4"
+    vim.api.nvim_set_hl(0, "TreeDiffCursorLine", { fg = normal_fg, bg = "#313244" })
 
     -- Apply token highlights BEFORE stripping filetype (highlight needs it)
     highlight.attach(lhs_bufnr, rhs_bufnr)
@@ -60,7 +64,9 @@ function M.open(file1, file2)
       vim.bo[buf].syntax = ""
       vim.bo[buf].filetype = ""
 
-      -- Window options: cursorline on, nothing else
+      -- Window options: cursorline on, nothing else.
+      -- Neovim bug #9800: CursorLine gets unwanted underline in diff regions
+      -- when guifg is unset. Workaround: set fg to Normal's fg color.
       vim.wo[win].cursorline = true
       vim.wo[win].winhighlight = "CursorLine:TreeDiffCursorLine,CursorLineNr:TreeDiffCursorLine"
       vim.wo[win].signcolumn = "no"
