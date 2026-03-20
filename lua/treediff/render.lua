@@ -121,6 +121,7 @@ end
 
 --- Global function for statuscolumn: show original file line number or blank for fillers.
 function _G.TreeDiffLineNr()
+  if vim.v.virtnum > 0 then return "     " end
   local bufnr = vim.api.nvim_get_current_buf()
   local lnum = vim.v.lnum  -- 1-indexed
   local map = vim.b[bufnr].treediff_buf_to_file
