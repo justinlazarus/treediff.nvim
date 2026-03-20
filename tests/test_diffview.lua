@@ -153,6 +153,59 @@ test("TreeDiffOff clears extmarks", function()
   os.remove(tmp2)
 end)
 
+-- 9. sync_wrap_alignment adds virt_lines when one side wraps more
+test("wrap alignment compensates for asymmetric wrapping", function()
+  vim.o.columns = 160
+  vim.o.lines = 40
+  local render = require("treediff.render")
+  local wrap_ns = vim.api.nvim_create_namespace("treediff_wrap_align")
+
+  local lhs_buf = vim.api.nvim_create_buf(false, true)
+  local rhs_buf = vim.api.nvim_create_buf(false, true)
+
+  -- LHS: short. RHS: long enough to wrap in ~80 col window
+  vim.api.nvim_buf_set_lines(lhs_buf, 0, -1, false, {
+    "line one",
+    "var x = 1;",
+    "line three",
+  })
+  vim.api.nvim_buf_set_lines(rhs_buf, 0, -1, false, {
+    "line one",
+    "ShipToLoadItemV2 result = await loadService.MarkLoadReadyToClose(loadId, palletCount, depotIds);",
+    "line three",
+  })
+
+  vim.cmd("vsplit")
+  local lhs_win = vim.api.nvim_get_current_win()
+  vim.cmd("wincmd l")
+  local rhs_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(lhs_win, lhs_buf)
+  vim.api.nvim_win_set_buf(rhs_win, rhs_buf)
+
+  for _, win in ipairs({ lhs_win, rhs_win }) do
+    vim.wo[win].wrap = true
+    vim.wo[win].linebreak = true
+  end
+
+  -- Confirm RHS line 2 wraps more than LHS
+  local lhs_h = vim.api.nvim_win_text_height(lhs_win, { start_row = 1, end_row = 1 }).all
+  local rhs_h = vim.api.nvim_win_text_height(rhs_win, { start_row = 1, end_row = 1 }).all
+  assert(rhs_h > lhs_h, "RHS line should wrap more than LHS")
+
+  render.sync_wrap_alignment(lhs_win, rhs_win, lhs_buf, rhs_buf)
+
+  -- Verify virt_lines extmark was placed on LHS to compensate
+  local marks = vim.api.nvim_buf_get_extmarks(lhs_buf, wrap_ns, 0, -1, { details = true })
+  assert(#marks > 0, "expected virt_lines extmark on LHS buffer")
+  local virt_count = #(marks[1][4].virt_lines or {})
+  assert_eq(virt_count, rhs_h - lhs_h, "virt_lines count should match height difference")
+
+  -- Cleanup
+  vim.cmd("only")
+  vim.api.nvim_buf_delete(lhs_buf, { force = true })
+  vim.api.nvim_buf_delete(rhs_buf, { force = true })
+end)
+
 -- Summary
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 if failed > 0 then
