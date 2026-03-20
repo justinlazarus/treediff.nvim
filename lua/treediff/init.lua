@@ -49,6 +49,7 @@ M.config = {
   auto_highlight = true,
   use_diffexpr = false,
   priority = 200,
+  wordwrap = true,
 }
 
 --- Set up treediff with optional config.
