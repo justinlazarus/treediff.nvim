@@ -95,7 +95,9 @@ function M.setup(opts)
       local lhs_buf = vim.api.nvim_win_get_buf(diff_wins[1])
       local rhs_buf = vim.api.nvim_win_get_buf(diff_wins[2])
       local ft = vim.bo[lhs_buf].filetype
-      local has_ts = pcall(vim.treesitter.language.inspect, ft)
+      local ft_map_mod = require("treediff.ft_map")
+      local ts_lang = ft_map_mod[ft] or ft
+      local has_ts = pcall(vim.treesitter.language.inspect, ts_lang)
 
       if has_ts and ft ~= "" then
         -- Tree-aware alignment: disable Neovim's diff mode, use our own pipeline
