@@ -146,6 +146,7 @@ pub extern "C" fn treediff_diff_tokens(
     struct DiffOut {
         lhs_tokens: Vec<TokenOut>,
         rhs_tokens: Vec<TokenOut>,
+        anchors: Vec<(usize, usize)>,
     }
 
     let out = DiffOut {
@@ -169,6 +170,7 @@ pub extern "C" fn treediff_diff_tokens(
                 end_col: t.end_col,
             })
             .collect(),
+        anchors: result.anchors,
     };
 
     let json = serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string());
@@ -207,6 +209,7 @@ pub extern "C" fn treediff_diff_nodes(
         struct DiffOut {
             lhs_tokens: Vec<TokenOut>,
             rhs_tokens: Vec<TokenOut>,
+            anchors: Vec<(usize, usize)>,
         }
 
         let out = DiffOut {
@@ -230,6 +233,7 @@ pub extern "C" fn treediff_diff_nodes(
                     end_col: t.end_col,
                 })
                 .collect(),
+            anchors: result.anchors,
         };
 
         let json = serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string());

@@ -49,8 +49,39 @@ local function place_marks(bufnr, tokens, hl_group, nr_hl_group)
   end
 end
 
+--- Place extmarks for Novel tokens with coordinate translation via file_to_buf map.
+--- @param bufnr number
+--- @param tokens table[]  each { line, start_col, end_col } (0-indexed file lines)
+--- @param hl_group string
+--- @param nr_hl_group string
+--- @param file_to_buf table  { [0-indexed_file_line] = 1-indexed_buf_row }
+function M.place_marks_mapped(bufnr, tokens, hl_group, nr_hl_group, file_to_buf)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local nr_lines = {}
+  for _, tok in ipairs(tokens) do
+    local buf_row = file_to_buf[tok.line]
+    if buf_row then
+      local buf_line = buf_row - 1  -- convert to 0-indexed
+      if buf_line < line_count then
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, buf_line, tok.start_col, {
+          end_col = tok.end_col,
+          hl_group = hl_group,
+          priority = priority,
+        })
+        if not nr_lines[buf_line] then
+          nr_lines[buf_line] = true
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, buf_line, 0, {
+            number_hl_group = nr_hl_group,
+            priority = priority,
+          })
+        end
+      end
+    end
+  end
+end
+
 --- Context lines around each hunk for structural diff.
-local CONTEXT = 3
+local CONTEXT = 10
 
 --- Maximum lines to send to the structural diff per hunk.
 local MAX_HUNK_LINES = 500

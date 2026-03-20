@@ -1,14 +1,14 @@
 local M = {}
 local highlight = require("treediff.highlight")
+local render = require("treediff.render")
 
--- Save/restore Neovim's built-in DiffText so we can neutralize it during our view.
-local saved_difftext = nil
-
---- Open two files in Neovim's diff mode with token-level highlights.
+--- Open two files with tree-aware aligned diff (no :diffthis).
 --- @param file1 string
 --- @param file2 string
 function M.open(file1, file2)
-  -- Save highlights and fillchars for restoration on close.
+  local treediff = require("treediff")
+
+  -- Save highlights for restoration on close
   M._saved_hl = {
     DiffText = vim.api.nvim_get_hl(0, { name = "DiffText" }),
     DiffChange = vim.api.nvim_get_hl(0, { name = "DiffChange" }),
@@ -16,62 +16,53 @@ function M.open(file1, file2)
     DiffDelete = vim.api.nvim_get_hl(0, { name = "DiffDelete" }),
   }
   M._saved_fillchars = vim.o.fillchars
-  vim.opt.fillchars:append("diff: ")
 
+  -- Open file1 in current window
   vim.cmd("edit " .. vim.fn.fnameescape(file1))
-  vim.cmd("diffthis")
-  local lhs_bufnr = vim.api.nvim_get_current_buf()
+  local lhs_buf = vim.api.nvim_get_current_buf()
+  local lhs_win = vim.api.nvim_get_current_win()
 
-  vim.cmd("vertical diffsplit " .. vim.fn.fnameescape(file2))
-  local rhs_bufnr = vim.api.nvim_get_current_buf()
+  -- Open file2 in a vertical split
+  vim.cmd("vsplit " .. vim.fn.fnameescape(file2))
+  local rhs_buf = vim.api.nvim_get_current_buf()
+  local rhs_win = vim.api.nvim_get_current_win()
 
-  -- Apply all overrides in vim.schedule so they run AFTER all autocommands
-  -- (colorscheme, filetype, syntax) triggered by loading the files.
+  -- Use vim.schedule so filetype detection completes first (we need ft for lang)
   vim.schedule(function()
-    -- Difftastic style: bold red/green text only, no background highlights.
-    -- Neutralize ALL built-in diff highlights.
+    -- Neutralize built-in diff highlights (they'd show if diff mode leaks)
     vim.api.nvim_set_hl(0, "DiffChange", {})
     vim.api.nvim_set_hl(0, "DiffAdd", {})
     vim.api.nvim_set_hl(0, "DiffText", {})
     vim.api.nvim_set_hl(0, "DiffDelete", {})
 
-    -- Token highlights: bold red (deleted), bold green (added)
-    vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true })
-    vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true })
-    vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
-    vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
+    -- Run the full tree-aware pipeline
+    treediff.view(lhs_buf, rhs_buf)
 
-    -- Apply token highlights BEFORE stripping filetype (highlight needs it)
-    highlight.attach(lhs_bufnr, rhs_bufnr)
-
-    -- Now make diff buffers completely plain — no plugins should decorate these.
-    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-      local buf = vim.api.nvim_win_get_buf(win)
-
-      pcall(vim.treesitter.stop, buf)
-      vim.bo[buf].syntax = ""
-      vim.bo[buf].filetype = ""
-
-      vim.wo[win].cursorline = true
-      vim.wo[win].signcolumn = "no"
-      vim.wo[win].foldcolumn = "0"
-      vim.wo[win].colorcolumn = ""
-      vim.wo[win].statuscolumn = ""
-      vim.wo[win].spell = false
-      vim.wo[win].list = false
-      vim.wo[win].number = true
-      vim.wo[win].relativenumber = false
-    end
+    -- Track windows for cleanup
+    M._lhs_win = lhs_win
+    M._rhs_win = rhs_win
   end)
 end
 
---- Close diff mode and clear highlights in all windows of the current tab.
+--- Close the aligned view and restore highlights.
 function M.close()
-  vim.cmd("diffoff!")
   pcall(vim.api.nvim_del_augroup_by_name, "treediff_highlight")
-  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    highlight.clear(vim.api.nvim_win_get_buf(win))
+
+  -- Clean up render state
+  local wins = {}
+  if M._lhs_win then wins[#wins + 1] = M._lhs_win end
+  if M._rhs_win then wins[#wins + 1] = M._rhs_win end
+  if #wins > 0 then
+    render.cleanup(wins)
+  else
+    -- Fallback: clean all windows in tab
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      highlight.clear(vim.api.nvim_win_get_buf(win))
+    end
   end
+  M._lhs_win = nil
+  M._rhs_win = nil
+
   -- Restore original highlights
   if M._saved_hl then
     for name, hl in pairs(M._saved_hl) do

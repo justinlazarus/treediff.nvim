@@ -374,6 +374,9 @@ pub enum TokenChange {
 pub struct DiffResult {
     pub lhs_tokens: Vec<TokenInfo>,
     pub rhs_tokens: Vec<TokenInfo>,
+    /// Anchor pairs: (lhs_line, rhs_line) for unchanged nodes.
+    /// Used by Lua to build tree-aware line alignment.
+    pub anchors: Vec<(usize, usize)>,
 }
 
 /// Collect token-level change info from syntax nodes.
@@ -482,6 +485,74 @@ fn add_node_tokens<'a>(
     }
 }
 
+/// Collect anchor pairs (lhs_line, rhs_line) from unchanged nodes.
+/// These tell the Lua alignment module which lines are structurally paired.
+fn collect_anchors<'a>(
+    lhs_nodes: &[&'a Syntax<'a>],
+    change_map: &ChangeMap<'a>,
+    anchors: &mut std::collections::BTreeSet<(usize, usize)>,
+) {
+    use crate::diff::changes::ChangeKind;
+
+    for node in lhs_nodes {
+        let change = change_map.get(node);
+        match change {
+            Some(ChangeKind::Unchanged(rhs_node)) => {
+                // Extract line numbers from both sides and pair them
+                let lhs_lines = node_lines(node);
+                let rhs_lines = node_lines(rhs_node);
+                for (l, r) in lhs_lines.iter().zip(rhs_lines.iter()) {
+                    anchors.insert((*l, *r));
+                }
+                // Recurse into children for List nodes
+                if let (
+                    Syntax::List { children: lhs_children, .. },
+                    Syntax::List { children: rhs_children, .. },
+                ) = (node, rhs_node) {
+                    // Children may have finer-grained changes
+                    collect_anchors(lhs_children, change_map, anchors);
+                    let _ = rhs_children; // rhs children are walked via lhs unchanged refs
+                }
+            }
+            Some(ChangeKind::ReplacedComment(_, _)) | Some(ChangeKind::ReplacedString(_, _)) => {
+                // These are changes, not anchors
+            }
+            Some(ChangeKind::Novel) => {
+                // Changed node, not an anchor
+            }
+            None => {
+                // No change info — recurse into children
+                if let Syntax::List { children, .. } = node {
+                    collect_anchors(children, change_map, anchors);
+                }
+            }
+        }
+    }
+}
+
+/// Get all line numbers covered by a syntax node (without recursing into children).
+fn node_lines(node: &Syntax) -> Vec<usize> {
+    match node {
+        Syntax::Atom { position, .. } => {
+            position.iter().map(|s| s.line.0 as usize).collect()
+        }
+        Syntax::List {
+            open_position,
+            close_position,
+            ..
+        } => {
+            let mut lines: Vec<usize> = Vec::new();
+            for s in open_position {
+                lines.push(s.line.0 as usize);
+            }
+            for s in close_position {
+                lines.push(s.line.0 as usize);
+            }
+            lines
+        }
+    }
+}
+
 /// Compute a structural diff returning token-level change data.
 /// This is the API that plz.nvim (or any plugin) calls.
 pub fn diff_tokens(
@@ -512,9 +583,14 @@ pub fn diff_tokens(
     collect_tokens(&lhs_nodes, &change_map, &mut lhs_tokens);
     collect_tokens(&rhs_nodes, &change_map, &mut rhs_tokens);
 
+    let mut anchor_set = std::collections::BTreeSet::new();
+    collect_anchors(&lhs_nodes, &change_map, &mut anchor_set);
+    let anchors: Vec<(usize, usize)> = anchor_set.into_iter().collect();
+
     Some(DiffResult {
         lhs_tokens,
         rhs_tokens,
+        anchors,
     })
 }
 
@@ -546,9 +622,14 @@ pub fn diff_tokens_from_json(
     collect_tokens(&lhs_nodes, &change_map, &mut lhs_tokens);
     collect_tokens(&rhs_nodes, &change_map, &mut rhs_tokens);
 
+    let mut anchor_set = std::collections::BTreeSet::new();
+    collect_anchors(&lhs_nodes, &change_map, &mut anchor_set);
+    let anchors: Vec<(usize, usize)> = anchor_set.into_iter().collect();
+
     Some(DiffResult {
         lhs_tokens,
         rhs_tokens,
+        anchors,
     })
 }
 

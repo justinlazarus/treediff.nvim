@@ -90,30 +90,41 @@ function M.setup(opts)
           DiffDelete = vim.api.nvim_get_hl(0, { name = "DiffDelete" }),
         }
       end
-      vim.api.nvim_set_hl(0, "DiffChange", {})
-      vim.api.nvim_set_hl(0, "DiffAdd", {})
-      vim.api.nvim_set_hl(0, "DiffText", {})
-      vim.api.nvim_set_hl(0, "DiffDelete", {})
 
-      -- Token + line number highlights
-      vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true })
-      vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true })
-      vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
-      vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
+      -- Check if tree-sitter parser exists for the filetype
+      local lhs_buf = vim.api.nvim_win_get_buf(diff_wins[1])
+      local rhs_buf = vim.api.nvim_win_get_buf(diff_wins[2])
+      local ft = vim.bo[lhs_buf].filetype
+      local has_ts = pcall(vim.treesitter.language.inspect, ft)
 
-      -- Blank filler lines (no dashes)
-      vim.opt.fillchars:append("diff: ")
+      if has_ts and ft ~= "" then
+        -- Tree-aware alignment: disable Neovim's diff mode, use our own pipeline
+        vim.cmd("diffoff!")
+        vim.api.nvim_set_hl(0, "DiffChange", {})
+        vim.api.nvim_set_hl(0, "DiffAdd", {})
+        vim.api.nvim_set_hl(0, "DiffText", {})
+        vim.api.nvim_set_hl(0, "DiffDelete", {})
+        M.view(lhs_buf, rhs_buf)
+      else
+        -- Fallback: overlay token highlights on Neovim's diff mode
+        vim.api.nvim_set_hl(0, "DiffChange", {})
+        vim.api.nvim_set_hl(0, "DiffAdd", {})
+        vim.api.nvim_set_hl(0, "DiffText", {})
+        vim.api.nvim_set_hl(0, "DiffDelete", {})
 
-      -- Apply token highlights
-      local lhs = vim.api.nvim_win_get_buf(diff_wins[1])
-      local rhs = vim.api.nvim_win_get_buf(diff_wins[2])
-      highlight.attach(lhs, rhs)
+        vim.api.nvim_set_hl(0, "TreeDiffDelete", { fg = "#ff6e6e", bold = true })
+        vim.api.nvim_set_hl(0, "TreeDiffAdd", { fg = "#6eff6e", bold = true })
+        vim.api.nvim_set_hl(0, "TreeDiffDeleteNr", { fg = "#ff6e6e", bold = true })
+        vim.api.nvim_set_hl(0, "TreeDiffAddNr", { fg = "#6eff6e", bold = true })
 
-      -- Stop treesitter highlighting on diff buffers so token colors are clean
-      for _, win in ipairs(diff_wins) do
-        local buf = vim.api.nvim_win_get_buf(win)
-        pcall(vim.treesitter.stop, buf)
-        vim.bo[buf].syntax = ""
+        vim.opt.fillchars:append("diff: ")
+        highlight.attach(lhs_buf, rhs_buf)
+
+        for _, win in ipairs(diff_wins) do
+          local buf = vim.api.nvim_win_get_buf(win)
+          pcall(vim.treesitter.stop, buf)
+          vim.bo[buf].syntax = ""
+        end
       end
     end
 
@@ -124,8 +135,11 @@ function M.setup(opts)
         end
         saved_hl = nil
       end
-      -- Clear treediff extmarks from all visible buffers
-      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      -- Clear treediff extmarks and render state from all visible buffers
+      local render_mod = require("treediff.render")
+      local wins = vim.api.nvim_tabpage_list_wins(0)
+      render_mod.cleanup(wins)
+      for _, win in ipairs(wins) do
         highlight.clear(vim.api.nvim_win_get_buf(win))
       end
     end
@@ -190,6 +204,61 @@ function M.diff(old_content, new_content, lang)
   local ok, result = pcall(vim.json.decode, json_str)
   if not ok then return nil end
   return result
+end
+
+--- Full pipeline: diff → align → render two buffers side by side.
+--- @param lhs_buf number  buffer with original content
+--- @param rhs_buf number  buffer with new content
+function M.view(lhs_buf, rhs_buf)
+  local align = require("treediff.align")
+  local render = require("treediff.render")
+  local ft_map = require("treediff.ft_map")
+
+  local ft = vim.bo[lhs_buf].filetype
+  local lang = ft_map[ft] or ft
+
+  local lhs_lines = vim.api.nvim_buf_get_lines(lhs_buf, 0, -1, false)
+  local rhs_lines = vim.api.nvim_buf_get_lines(rhs_buf, 0, -1, false)
+  local lhs_text = table.concat(lhs_lines, "\n") .. "\n"
+  local rhs_text = table.concat(rhs_lines, "\n") .. "\n"
+
+  -- Run structural diff (returns tokens + anchors)
+  local result = M.diff(lhs_text, rhs_text, lang)
+  if not result then return end
+
+  -- Build aligned padded arrays
+  local aligned = align.build(lhs_lines, rhs_lines, result.anchors)
+
+  -- Build coordinate translation maps
+  local lhs_maps = align.build_maps(aligned.lhs_padded)
+  local rhs_maps = align.build_maps(aligned.rhs_padded)
+
+  -- Find the windows showing these buffers
+  local lhs_win, rhs_win
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if buf == lhs_buf then lhs_win = win
+    elseif buf == rhs_buf then rhs_win = win
+    end
+  end
+  if not lhs_win or not rhs_win then return end
+
+  -- Render
+  render.render(lhs_win, rhs_win, aligned.lhs_padded, aligned.rhs_padded, result, lhs_maps, rhs_maps)
+end
+
+--- Return the buf_to_file line mapping for a buffer rendered by M.view().
+--- @param bufnr number
+--- @return table|nil  { [1-indexed_buf_row] = 0-indexed_file_line }
+function M.line_map(bufnr)
+  return vim.b[bufnr].treediff_buf_to_file
+end
+
+--- Re-run the diff + align + render pipeline for two buffers.
+--- @param lhs_buf number
+--- @param rhs_buf number
+function M.recompute(lhs_buf, rhs_buf)
+  M.view(lhs_buf, rhs_buf)
 end
 
 return M
