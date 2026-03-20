@@ -68,9 +68,6 @@ local function setup_window(win, bufnr)
   vim.wo[win].list = false
   vim.wo[win].number = true
   vim.wo[win].relativenumber = false
-  local ww = require("treediff").config.wordwrap
-  vim.wo[win].wrap = ww
-  vim.wo[win].linebreak = ww
   vim.wo[win].foldmethod = "manual"
   vim.wo[win].foldlevel = 999
 

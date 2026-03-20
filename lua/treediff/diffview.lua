@@ -37,6 +37,15 @@ function M.open(file1, file2)
     -- Run the full tree-aware pipeline
     treediff.view(lhs_buf, rhs_buf)
 
+    -- Apply wordwrap config to diff windows
+    local ww = treediff.config.wordwrap
+    if ww ~= nil then
+      for _, win in ipairs({ lhs_win, rhs_win }) do
+        vim.wo[win].wrap = ww
+        vim.wo[win].linebreak = ww
+      end
+    end
+
     -- Track windows for cleanup
     M._lhs_win = lhs_win
     M._rhs_win = rhs_win
