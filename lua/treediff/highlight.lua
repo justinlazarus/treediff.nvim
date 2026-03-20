@@ -1,5 +1,4 @@
 local M = {}
-local treediff = require("treediff")
 local ft_map = require("treediff.ft_map")
 
 local ns = vim.api.nvim_create_namespace("treediff")
@@ -129,6 +128,7 @@ end
 --- @param lhs_bufnr number
 --- @param rhs_bufnr number
 function M.apply(lhs_bufnr, rhs_bufnr)
+  local treediff = require("treediff")
   M.clear(lhs_bufnr)
   M.clear(rhs_bufnr)
 

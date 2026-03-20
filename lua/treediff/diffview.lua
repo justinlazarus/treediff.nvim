@@ -1,6 +1,5 @@
 local M = {}
 local highlight = require("treediff.highlight")
-local render = require("treediff.render")
 
 --- Open two files with tree-aware aligned diff (no :diffthis).
 --- @param file1 string
@@ -53,7 +52,7 @@ function M.close()
   if M._lhs_win then wins[#wins + 1] = M._lhs_win end
   if M._rhs_win then wins[#wins + 1] = M._rhs_win end
   if #wins > 0 then
-    render.cleanup(wins)
+    require("treediff.render").cleanup(wins)
   else
     -- Fallback: clean all windows in tab
     for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
