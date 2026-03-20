@@ -210,11 +210,18 @@ function M.sync_wrap_alignment(lhs_win, rhs_win, lhs_buf, rhs_buf)
 
   if not vim.wo[lhs_win].wrap then return end
 
+  -- Pass 1: measure all line heights (before adding any extmarks)
   local line_count = vim.api.nvim_buf_line_count(lhs_buf)
+  local diffs = {}
   for i = 0, line_count - 1 do
     local lhs_h = vim.api.nvim_win_text_height(lhs_win, { start_row = i, end_row = i }).all
     local rhs_h = vim.api.nvim_win_text_height(rhs_win, { start_row = i, end_row = i }).all
-    local diff = rhs_h - lhs_h
+    diffs[i] = rhs_h - lhs_h
+  end
+
+  -- Pass 2: apply virtual lines
+  for i = 0, line_count - 1 do
+    local diff = diffs[i]
     if diff > 0 then
       local vlines = {}
       for _ = 1, diff do vlines[#vlines + 1] = { { "", "" } } end
