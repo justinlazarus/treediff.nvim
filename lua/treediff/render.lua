@@ -185,7 +185,7 @@ function M.render(lhs_win, rhs_win, lhs_padded, rhs_padded, diff_result, lhs_map
   vim.cmd("syncbind")
 
   -- Recalculate on resize
-  vim.api.nvim_create_autocmd("WinResized", {
+  vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
     group = vim.api.nvim_create_augroup("treediff_wrap_align", { clear = true }),
     callback = function()
       if vim.api.nvim_win_is_valid(lhs_win) and vim.api.nvim_win_is_valid(rhs_win) then
