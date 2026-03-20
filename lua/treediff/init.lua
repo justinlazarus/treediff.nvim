@@ -137,12 +137,18 @@ function M.setup(opts)
         end
         saved_hl = nil
       end
-      -- Clear treediff extmarks and render state from all visible buffers
-      local render_mod = require("treediff.render")
-      local wins = vim.api.nvim_tabpage_list_wins(0)
-      render_mod.cleanup(wins)
-      for _, win in ipairs(wins) do
-        highlight.clear(vim.api.nvim_win_get_buf(win))
+      -- Only clear buffers that don't have treediff alignment state
+      -- (Plz manages its own treediff buffers via _line_nums)
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local buf = vim.api.nvim_win_get_buf(win)
+        if not vim.b[buf].treediff_buf_to_file then
+          highlight.clear(buf)
+          pcall(function()
+            vim.wo[win].scrollbind = false
+            vim.wo[win].cursorbind = false
+            vim.wo[win].statuscolumn = ""
+          end)
+        end
       end
     end
 
