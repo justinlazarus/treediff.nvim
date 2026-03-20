@@ -82,13 +82,13 @@ test("TreeDiff command opens diff", function()
   local wins = vim.api.nvim_tabpage_list_wins(0)
   assert(#wins >= 2, "expected 2 windows, got " .. #wins)
 
-  local diff_count = 0
+  local sb_count = 0
   for _, win in ipairs(wins) do
-    if vim.wo[win].diff then
-      diff_count = diff_count + 1
+    if vim.wo[win].scrollbind then
+      sb_count = sb_count + 1
     end
   end
-  assert_eq(diff_count, 2, "diff windows")
+  assert_eq(sb_count, 2, "scrollbound windows")
 
   -- Cleanup
   vim.cmd("TreeDiffOff")

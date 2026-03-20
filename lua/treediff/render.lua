@@ -28,9 +28,12 @@ local function write_buffer(win, padded, tokens, file_to_buf, hl_group, nr_hl_gr
   vim.bo[bufnr].buftype = "nofile"
   vim.bo[bufnr].modified = false
 
-  -- Store maps as buffer variables
-  vim.b[bufnr].treediff_buf_to_file = buf_to_file
-  vim.b[bufnr].treediff_file_to_buf = file_to_buf
+  -- Store maps as buffer variables (string keys to avoid mixed-key table errors)
+  local b2f_str, f2b_str = {}, {}
+  for k, v in pairs(buf_to_file) do b2f_str[tostring(k)] = v end
+  for k, v in pairs(file_to_buf) do f2b_str[tostring(k)] = v end
+  vim.b[bufnr].treediff_buf_to_file = b2f_str
+  vim.b[bufnr].treediff_file_to_buf = f2b_str
 
   -- Place token extmarks (translate file lines to buffer rows)
   highlight.place_marks_mapped(bufnr, tokens, hl_group, nr_hl_group, file_to_buf)
@@ -122,9 +125,10 @@ function _G.TreeDiffLineNr()
   local bufnr = vim.api.nvim_get_current_buf()
   local lnum = vim.v.lnum  -- 1-indexed
   local map = vim.b[bufnr].treediff_buf_to_file
-  if map and map[lnum] then
+  local key = tostring(lnum)
+  if map and map[key] then
     -- Show 1-indexed original line number, right-aligned in 4 chars
-    return string.format("%4d ", map[lnum] + 1)
+    return string.format("%4d ", map[key] + 1)
   else
     return "     "
   end
