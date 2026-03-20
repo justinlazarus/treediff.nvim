@@ -180,8 +180,51 @@ function M.render(lhs_win, rhs_win, lhs_padded, rhs_padded, diff_result, lhs_map
   setup_navigation(lhs_bufnr, diff_result.lhs_tokens or {}, lhs_maps.file_to_buf)
   setup_navigation(rhs_bufnr, diff_result.rhs_tokens or {}, rhs_maps.file_to_buf)
 
-  -- Sync scroll position
+  -- Sync wrapped-line alignment and scroll position
+  M.sync_wrap_alignment(lhs_win, rhs_win, lhs_bufnr, rhs_bufnr)
   vim.cmd("syncbind")
+
+  -- Recalculate on resize
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = vim.api.nvim_create_augroup("treediff_wrap_align", { clear = true }),
+    callback = function()
+      if vim.api.nvim_win_is_valid(lhs_win) and vim.api.nvim_win_is_valid(rhs_win) then
+        M.sync_wrap_alignment(lhs_win, rhs_win, lhs_bufnr, rhs_bufnr)
+      end
+    end,
+  })
+end
+
+local wrap_ns = vim.api.nvim_create_namespace("treediff_wrap_align")
+
+--- Add virtual blank lines so wrapped lines stay visually aligned across panes.
+--- When a line wraps on one side but not the other, scrollbind can't compensate
+--- (it syncs logical lines, not visual). This adds virt_lines on the shorter side.
+--- @param lhs_win number
+--- @param rhs_win number
+--- @param lhs_buf number
+--- @param rhs_buf number
+function M.sync_wrap_alignment(lhs_win, rhs_win, lhs_buf, rhs_buf)
+  vim.api.nvim_buf_clear_namespace(lhs_buf, wrap_ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(rhs_buf, wrap_ns, 0, -1)
+
+  if not vim.wo[lhs_win].wrap then return end
+
+  local line_count = vim.api.nvim_buf_line_count(lhs_buf)
+  for i = 0, line_count - 1 do
+    local lhs_h = vim.api.nvim_win_text_height(lhs_win, { start_row = i, end_row = i }).all
+    local rhs_h = vim.api.nvim_win_text_height(rhs_win, { start_row = i, end_row = i }).all
+    local diff = rhs_h - lhs_h
+    if diff > 0 then
+      local vlines = {}
+      for _ = 1, diff do vlines[#vlines + 1] = { { "", "" } } end
+      vim.api.nvim_buf_set_extmark(lhs_buf, wrap_ns, i, 0, { virt_lines = vlines })
+    elseif diff < 0 then
+      local vlines = {}
+      for _ = 1, -diff do vlines[#vlines + 1] = { { "", "" } } end
+      vim.api.nvim_buf_set_extmark(rhs_buf, wrap_ns, i, 0, { virt_lines = vlines })
+    end
+  end
 end
 
 --- Clean up render state from windows/buffers.
